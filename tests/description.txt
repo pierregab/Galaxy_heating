@@ -1,0 +1,18 @@
+-------------------------------------------------
+         TESTS LIST AND DESCRIPTION
+-------------------------------------------------
+
+
+
+- Plot potential spatially colored
+- Plot B&W isopotential
+- One-star circular trajectory
+- One-star circular max #periods before chaos
+- One-star elliptic trajectory
+- One-star "spring motion" trajectory
+        (plot evolution of the maximum elongation as a function of time/periods)
+- One-star "spring motion" max #periods before chaos
+
+- Plot energy conservation
+- Plot momentum conservation
+- 
