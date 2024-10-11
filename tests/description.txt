@@ -11,8 +11,8 @@ v - One-star circular max #periods before chaos
 o - One-star elliptic trajectory
 o - One-star "spring motion" trajectory
         (plot evolution of the maximum elongation as a function of time/periods)
-v - One-star "spring motion" max #periods before chaos : still stable after 300 periods
+- One-star "spring motion" max #periods before chaos
 
 v - Plot energy conservation
 v - Plot momentum conservation
-- 
+v - Modify excentricity to see differences of errors between RK4 & leapfrog
