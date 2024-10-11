@@ -1,24 +1,117 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import argrelextrema
+import logging
+import timeit
 
-# Constants
-G = 1.0        # Gravitational constant
-M = 1.0       # Mass of the galaxy
-a = 2.5        # Radial scale length
-b = 1/20 * a        # Vertical scale length
+# Set up professional logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Time parameters
-dt = 0.001     # Time step
-t_max = 500.0  # Total simulation time
-steps = int(t_max / dt)
+# ============================================================
+# Unit Definitions and Scaling Factors
+# ============================================================
 
-# Functions for the potential and acceleration
+# Logging simulation properties
+logging.info("Starting the simulation with the following properties:")
+
+# ------------------------------------------------------------
+# Physical Units (Astrophysical Units)
+# ------------------------------------------------------------
+# - Mass Unit (M0): 1 x 10^11 solar masses (Msun)
+# - Length Unit (R0): 2.5 kiloparsecs (kpc)
+# - Time Unit (T0): Derived from R0 and M0 using G
+# - Velocity Unit (V0): Derived from R0 and T0
+
+# Gravitational constant in physical units (kpc^3 Msun^-1 Myr^-2)
+G_physical = 4.498e-12  # G = 4.498 x 10^-12 kpc^3 Msun^-1 Myr^-2
+
+# Physical constants
+M0 = 1e11           # Mass unit in solar masses (Msun)
+R0 = 1              # Length unit in kiloparsecs (kpc)
+
+# Calculate the time unit (T0) in Myr
+T0 = np.sqrt(R0**3 / (G_physical * M0))  # Time unit in Myr
+
+# Calculate the velocity unit (V0) in kpc/Myr
+V0 = R0 / T0  # Velocity unit in kpc/Myr
+
+# Convert velocity unit to km/s (1 kpc/Myr = 977.8 km/s)
+V0_kms = V0 * 977.8  # Velocity unit in km/s
+
+# Log the scaling factors
+logging.info(f"Physical units:")
+logging.info(f"  Gravitational constant (G_physical): {G_physical} kpc^3 Msun^-1 Myr^-2")
+logging.info(f"  Mass unit (M0): {M0} Msun")
+logging.info(f"  Length unit (R0): {R0} kpc")
+logging.info(f"  Time unit (T0): {T0:.3f} Myr")
+logging.info(f"  Velocity unit (V0): {V0_kms:.3f} km/s")
+
+# ------------------------------------------------------------
+# Simulation Units (Dimensionless Units)
+# ------------------------------------------------------------
+# - Gravitational Constant (G): Set to 1 for normalization
+# - Mass (M): Set to 1 to normalize mass
+# - Radial Scale Length (a): Set to 1 (dimensionless)
+# - Vertical Scale Length (b): Set to 0.05 (dimensionless)
+
+# Normalize constants for simulation
+G = 1.0        # Gravitational constant (normalized)
+M = 1.0        # Mass (normalized)
+a = 2.0        # Radial scale length (normalized to R0)
+b = 1/20 * a       # Vertical scale length (normalized)
+
+# Scaling Factors for conversion between simulation units and physical units
+length_scale = R0       # 1 simulation length unit = R0 kpc
+mass_scale = M0         # 1 simulation mass unit = M0 Msun
+time_scale = T0         # 1 simulation time unit = T0 Myr
+velocity_scale = V0     # 1 simulation velocity unit = V0 kpc/Myr
+velocity_scale_kms = V0_kms  # Velocity unit in km/s
+
+# ============================================================
+# Time Parameters (Dimensionless Units)
+# ============================================================
+
+dt = 0.001     # Time step (dimensionless)
+t_max = 250.0   # Total simulation time (dimensionless)
+steps = int(t_max / dt)  # Number of integration steps
+
+logging.info(f"Simulation time parameters:")
+logging.info(f"  Time step (dt): {dt} (dimensionless)")
+logging.info(f"  Total simulation time (t_max): {t_max} (dimensionless)")
+logging.info(f"  Number of steps: {steps}")
+
+# ============================================================
+# Potential and Acceleration Functions
+# ============================================================
+
 def potential(R, z):
+    """
+    Compute the gravitational potential at a given (R, z).
+
+    Parameters:
+    R : float or np.ndarray
+        Radial distance from the galactic center (dimensionless).
+    z : float or np.ndarray
+        Vertical distance from the galactic plane (dimensionless).
+
+    Returns:
+    float or np.ndarray
+        Gravitational potential at the specified location (dimensionless).
+    """
     denom = np.sqrt(R**2 + (a + np.sqrt(z**2 + b**2))**2)
     return -G * M / denom
 
 def acceleration(pos):
+    """
+    Compute the acceleration vector at a given position in the galaxy.
+
+    Parameters:
+    pos : np.ndarray
+        Position vector [x, y, z] in dimensionless units.
+
+    Returns:
+    np.ndarray
+        Acceleration vector [ax, ay, az] in dimensionless units.
+    """
     x, y, z = pos
     R = np.sqrt(x**2 + y**2)
     z_term = np.sqrt(z**2 + b**2)
@@ -28,222 +121,278 @@ def acceleration(pos):
     az = -G * M * (a + z_term) * z / (z_term * denom)
     return np.array([ax, ay, az])
 
-# Theoretical Calculations for 1D Motion
+# ============================================================
+# Integrator Functions
+# ============================================================
 
-# Initial conditions for 1D motion
-r0 = 5.0   # Initial radial position
-pos_initial = np.array([r0, 0.0, 0.0])  # Starting at x = r0, y = 0, z = 0
-vel_initial = np.array([0.0, 0.0, 0.0])  # No initial velocity
+def leapfrog_integrator(pos0, vel0, dt, steps):
+    """
+    Leapfrog integrator for orbit simulation.
 
-# Calculate angular frequency (omega) using harmonic approximation
-# Compute k = dF/dx at x = r0
-k = (G * M * (2 * r0**2 - (a + b)**2)) / ((r0**2 + (a + b)**2)**(5/2))
-omega = np.sqrt(k)  # Assuming unit mass
+    Parameters:
+    pos0 : np.ndarray
+        Initial position vector [x, y, z] (dimensionless).
+    vel0 : np.ndarray
+        Initial velocity vector [vx, vy, vz] (dimensionless).
+    dt : float
+        Time step (dimensionless).
+    steps : int
+        Number of integration steps.
 
-# Theoretical period
-T_theoretical = 2 * np.pi / omega
+    Returns:
+    tuple:
+        positions (np.ndarray): Positions over time.
+        velocities (np.ndarray): Velocities over time.
+        energies (np.ndarray): Total energy over time.
+        angular_momenta (np.ndarray): Angular momentum (Lz) over time.
+    """
+    logging.info("Starting Leapfrog integration.")
+    positions = np.zeros((steps, 3))
+    velocities = np.zeros((steps, 3))
+    energies = np.zeros(steps)
+    angular_momenta = np.zeros(steps)
 
-# Arrays to store data
-positions = np.zeros((steps, 3))
-velocities = np.zeros((steps, 3))
-energies = np.zeros(steps)
-angular_momenta = np.zeros(steps)
-times = np.linspace(0, t_max, steps)
+    pos = np.copy(pos0)
+    vel = np.copy(vel0)
+    vel_half = vel + 0.5 * dt * acceleration(pos)
 
-# Leapfrog integrator for circular orbit
-# Initialize for circular orbit
-pos = np.array([r0, 0.0, 0.0])  # Starting at x = r0, y = 0, z = 0
-R = np.sqrt(pos[0]**2 + pos[1]**2)
-z = pos[2]
-# Calculate the circular velocity needed
+    for i in range(steps):
+        # Update position
+        pos += dt * vel_half
+        positions[i] = pos
+
+        # Calculate acceleration at the new position
+        acc = acceleration(pos)
+
+        # Update velocity at the next half-step
+        vel_half += dt * acc
+
+        # Store the full-step velocity (average between half-steps)
+        velocities[i] = vel_half - 0.5 * dt * acc
+
+        # Compute kinetic and potential energy
+        v = np.linalg.norm(velocities[i])
+        R = np.sqrt(pos[0]**2 + pos[1]**2)
+        z = pos[2]
+        energies[i] = 0.5 * v**2 + potential(R, z)
+
+        # Compute angular momentum (Lz component)
+        angular_momenta[i] = pos[0] * velocities[i][1] - pos[1] * velocities[i][0]
+
+    logging.info("Leapfrog integration completed.")
+    return positions, velocities, energies, angular_momenta
+
+def rk4_integrator(pos0, vel0, dt, steps):
+    """
+    Runge-Kutta 4th order integrator for orbit simulation.
+
+    Parameters:
+    pos0 : np.ndarray
+        Initial position vector [x, y, z] (dimensionless).
+    vel0 : np.ndarray
+        Initial velocity vector [vx, vy, vz] (dimensionless).
+    dt : float
+        Time step (dimensionless).
+    steps : int
+        Number of integration steps.
+
+    Returns:
+    tuple:
+        positions (np.ndarray): Positions over time.
+        velocities (np.ndarray): Velocities over time.
+        energies (np.ndarray): Total energy over time.
+        angular_momenta (np.ndarray): Angular momentum (Lz) over time.
+    """
+    logging.info("Starting RK4 integration.")
+    positions = np.zeros((steps, 3))
+    velocities = np.zeros((steps, 3))
+    energies = np.zeros(steps)
+    angular_momenta = np.zeros(steps)
+
+    pos = np.copy(pos0)
+    vel = np.copy(vel0)
+
+    for i in range(steps):
+        # k1
+        acc1 = acceleration(pos)
+        k1_vel = dt * acc1
+        k1_pos = dt * vel
+
+        # k2
+        acc2 = acceleration(pos + 0.5 * k1_pos)
+        k2_vel = dt * acc2
+        k2_pos = dt * (vel + 0.5 * k1_vel)
+
+        # k3
+        acc3 = acceleration(pos + 0.5 * k2_pos)
+        k3_vel = dt * acc3
+        k3_pos = dt * (vel + 0.5 * k2_vel)
+
+        # k4
+        acc4 = acceleration(pos + k3_pos)
+        k4_vel = dt * acc4
+        k4_pos = dt * (vel + k3_vel)
+
+        # Update position and velocity
+        pos += (k1_pos + 2 * k2_pos + 2 * k3_pos + k4_pos) / 6
+        vel += (k1_vel + 2 * k2_vel + 2 * k3_vel + k4_vel) / 6
+
+        positions[i] = pos
+        velocities[i] = vel
+
+        # Compute kinetic and potential energy
+        v = np.linalg.norm(vel)
+        R = np.sqrt(pos[0]**2 + pos[1]**2)
+        z = pos[2]
+        energies[i] = 0.5 * v**2 + potential(R, z)
+
+        # Compute angular momentum (Lz component)
+        angular_momenta[i] = pos[0] * vel[1] - pos[1] * vel[0]
+
+    logging.info("RK4 integration completed.")
+    return positions, velocities, energies, angular_momenta
+
+# ============================================================
+# Initial Conditions (Dimensionless Units)
+# ============================================================
+
+# Initial radial position (dimensionless)
+r0 = 8.0  # Set to 2 x scale length 'a' for this example
+
+# Calculate the circular velocity needed for a stable orbit
+R = r0
+z = 0.0
 v_circular = np.sqrt(G * M * R**2 / (R**2 + (a + np.sqrt(z**2 + b**2))**2)**1.5)
-vel = np.array([0.0, v_circular, 0.0])  # Velocity in y-direction
 
-# Initialize storage for circular orbit
-positions_circ = np.zeros((steps, 3))
-velocities_circ = np.zeros((steps, 3))
-energies_circ = np.zeros(steps)
-angular_momenta_circ = np.zeros(steps)
+# Initial position and velocity vectors (dimensionless)
+pos_initial = np.array([r0, 0.0, 0.0])       # Starting at x = r0, y = 0, z = 0
+vel_initial = np.array([0.0, v_circular, 0.0])  # Velocity in the y-direction for circular motion
 
-# Leapfrog integrator for circular orbit
-vel_half = vel + 0.5 * dt * acceleration(pos)
+logging.info(f"Initial conditions:")
+logging.info(f"  Initial position: {pos_initial} (dimensionless)")
+logging.info(f"  Initial velocity: {vel_initial} (dimensionless)")
 
-for i in range(steps):
-    # Update position
-    pos += dt * vel_half
-    positions_circ[i] = pos
-    # Update acceleration
-    acc = acceleration(pos)
-    # Update velocity
-    vel_half += dt * acc
-    velocities_circ[i] = vel_half - 0.5 * dt * acc  # Average velocity
-    # Compute energy and angular momentum
-    R = np.sqrt(pos[0]**2 + pos[1]**2)
-    z = pos[2]
-    v = np.linalg.norm(velocities_circ[i])
-    energies_circ[i] = 0.5 * v**2 + potential(R, z)
-    angular_momenta_circ[i] = pos[0]*velocities_circ[i][1] - pos[1]*velocities_circ[i][0]  # Lz component
+# ============================================================
+# Perform Simulations and Measure Execution Time
+# ============================================================
 
-# 5. Simulate 1D Movement with No Radial Velocity
-# Initialize for 1D motion
-pos_1d = pos_initial.copy()
-vel_1d = vel_initial.copy()
+# Leapfrog Integration Timing
+def run_leapfrog():
+    positions_lf, velocities_lf, energies_lf, angular_momenta_lf = leapfrog_integrator(
+        pos_initial, vel_initial, dt, steps)
+    return positions_lf, velocities_lf, energies_lf, angular_momenta_lf
 
-# Reset arrays for 1D motion
-positions_1d = np.zeros((steps, 3))
-velocities_1d = np.zeros((steps, 3))
-energies_1d = np.zeros(steps)
+# Measure total time for Leapfrog integration
+start_time = timeit.default_timer()
+positions_lf, velocities_lf, energies_lf, angular_momenta_lf = run_leapfrog()
+total_time_lf = timeit.default_timer() - start_time
+average_time_lf = total_time_lf / steps
+logging.info(f"Leapfrog integration took {total_time_lf:.3f} seconds in total.")
+logging.info(f"Average time per step (Leapfrog): {average_time_lf*1e3:.6f} ms.")
 
-# Leapfrog integrator for 1D motion
-vel_half_1d = vel_1d + 0.5 * dt * acceleration(pos_1d)
+# RK4 Integration Timing
+def run_rk4():
+    positions_rk4, velocities_rk4, energies_rk4, angular_momenta_rk4 = rk4_integrator(
+        pos_initial, vel_initial, dt, steps)
+    return positions_rk4, velocities_rk4, energies_rk4, angular_momenta_rk4
 
-for i in range(steps):
-    # Update position
-    pos_1d += dt * vel_half_1d
-    positions_1d[i] = pos_1d
-    # Update acceleration
-    acc = acceleration(pos_1d)
-    # Update velocity
-    vel_half_1d += dt * acc
-    velocities_1d[i] = vel_half_1d - 0.5 * dt * acc
-    # Compute energy
-    R = np.sqrt(pos_1d[0]**2 + pos_1d[1]**2)
-    z = pos_1d[2]
-    v = np.linalg.norm(velocities_1d[i])
-    energies_1d[i] = 0.5 * v**2 + potential(R, z)
+# Measure total time for RK4 integration
+start_time = timeit.default_timer()
+positions_rk4, velocities_rk4, energies_rk4, angular_momenta_rk4 = run_rk4()
+total_time_rk4 = timeit.default_timer() - start_time
+average_time_rk4 = total_time_rk4 / steps
+logging.info(f"RK4 integration took {total_time_rk4:.3f} seconds in total.")
+logging.info(f"Average time per step (RK4): {average_time_rk4*1e3:.6f} ms.")
 
-# Analyze position deviation over time
-# Find extrema positions
-positions_x = positions_1d[:,0]
+# ============================================================
+# Conversion to Physical Units
+# ============================================================
 
-# Use scipy.signal.argrelextrema to find local maxima and minima
-max_indices = argrelextrema(positions_x, np.greater)[0]
-min_indices = argrelextrema(positions_x, np.less)[0]
+# Time array (dimensionless and physical)
+times = np.linspace(0, t_max, steps)
+times_physical = times * time_scale  # Time in Myr
 
-# Extract times and positions at maxima and minima
-times_max = times[max_indices]
-times_min = times[min_indices]
-positions_max = positions_x[max_indices]
-positions_min = positions_x[min_indices]
+# Leapfrog: Convert positions and velocities to physical units
+positions_lf_physical = positions_lf * length_scale  # Positions in kpc
+velocities_lf_physical = velocities_lf * velocity_scale_kms  # Velocities in km/s
+energies_lf_physical = energies_lf * velocity_scale_kms**2  # Energy per unit mass in (km/s)^2
+angular_momenta_lf_physical = angular_momenta_lf * length_scale * velocity_scale_kms
 
-# Combine maxima and minima for plotting
-orbit_numbers_max = np.arange(1, len(positions_max) + 1)
-orbit_numbers_min = np.arange(1, len(positions_min) + 1)
+# RK4: Convert positions and velocities to physical units
+positions_rk4_physical = positions_rk4 * length_scale  # Positions in kpc
+velocities_rk4_physical = velocities_rk4 * velocity_scale_kms  # Velocities in km/s
+energies_rk4_physical = energies_rk4 * velocity_scale_kms**2  # Energy per unit mass in (km/s)^2
+angular_momenta_rk4_physical = angular_momenta_rk4 * length_scale * velocity_scale_kms
 
-# Calculate theoretical maxima and minima (Assuming harmonic oscillation)
-positions_theoretical_max = r0  # + amplitude (harmonic)
-positions_theoretical_min = -r0  # - amplitude (harmonic)
+# ============================================================
+# Compute Energy and Angular Momentum Errors
+# ============================================================
 
-# Compute percentage differences
-# Avoid division by zero by ensuring theoretical positions are not zero
-percentage_diff_max = ((positions_max - positions_theoretical_max) / positions_theoretical_max) * 100
-percentage_diff_min = ((positions_min - positions_theoretical_min) / positions_theoretical_min) * 100
+# For Leapfrog Integrator
+E0_lf = energies_lf_physical[0]
+L0_lf = angular_momenta_lf_physical[0]
 
-# --- Plotting ---
+E_error_lf = (energies_lf_physical - E0_lf) / np.abs(E0_lf)
+L_error_lf = (angular_momenta_lf_physical - L0_lf) / np.abs(L0_lf)
 
-# --- Summary Graph 1: Circular Orbit ---
+# For RK4 Integrator
+E0_rk4 = energies_rk4_physical[0]
+L0_rk4 = angular_momenta_rk4_physical[0]
 
-# change dpi 
-plt.rcParams['figure.dpi'] = 150
+E_error_rk4 = (energies_rk4_physical - E0_rk4) / np.abs(E0_rk4)
+L_error_rk4 = (angular_momenta_rk4_physical - L0_rk4) / np.abs(L0_rk4)
 
-# Calculate normalized energy and angular momentum errors
-initial_energy_circ = energies_circ[0]
-normalized_energy_error_circ = (energies_circ - initial_energy_circ) / np.abs(initial_energy_circ) * 100  # Percentage error
+# ============================================================
+# Plotting Results
+# ============================================================
 
-initial_Lz_circ = angular_momenta_circ[0]
-normalized_Lz_error_circ = (angular_momenta_circ - initial_Lz_circ) / np.abs(initial_Lz_circ) * 100  # Percentage error
+logging.info("Generating plots.")
 
-# To avoid taking log of zero or negative values, add a small epsilon
-epsilon = 1e-20
-normalized_energy_error_circ_safe = np.abs(normalized_energy_error_circ) + epsilon
-normalized_Lz_error_circ_safe = np.abs(normalized_Lz_error_circ) + epsilon
-
-# Create the Circular Orbit Summary Figure
-fig_circ, axs_circ = plt.subplots(2, 1, figsize=(12, 12))
-
-# 1. Orbit Trajectory
-axs_circ[0].plot(positions_circ[:,0], positions_circ[:,1], color='blue', lw=1, label='Orbit Path')
-axs_circ[0].plot(0, 0, 'ro', label='Galactic Center')
-axs_circ[0].set_xlabel('x')
-axs_circ[0].set_ylabel('y')
-axs_circ[0].set_title('Circular Orbit Trajectory')
-axs_circ[0].axis('equal')
-axs_circ[0].legend()
-axs_circ[0].grid(True, linestyle='--', alpha=0.7)
-
-# 2. Normalized Energy and Angular Momentum Errors Over Time (Log Scale)
-ax2 = axs_circ[1]  # Primary y-axis
-color1 = 'green'
-ax2.set_xlabel('Time')
-ax2.set_ylabel('Normalized Energy Error (%)', color=color1)
-ax2.set_yscale('log')  # Set y-axis to logarithmic scale
-ax2.plot(times, normalized_energy_error_circ_safe, color=color1, lw=1, label='Energy Error')
-ax2.tick_params(axis='y', labelcolor=color1)
-ax2.grid(True, linestyle='--', alpha=0.7)
-
-ax3 = ax2.twinx()  # Secondary y-axis
-color2 = 'purple'
-ax3.set_ylabel('Normalized Angular Momentum Error (%)', color=color2)
-ax3.set_yscale('log')  # Set y-axis to logarithmic scale
-ax3.plot(times, normalized_Lz_error_circ_safe, color=color2, lw=1, label='Angular Momentum Error')
-ax3.tick_params(axis='y', labelcolor=color2)
-
-# Add legends
-lines_1, labels_1 = ax2.get_legend_handles_labels()
-lines_2, labels_2 = ax3.get_legend_handles_labels()
-axs_circ[1].legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
-
-axs_circ[1].set_title('Normalized Energy and Angular Momentum Errors Over Time (Circular Orbit)')
-
-fig_circ.tight_layout()
+# Plot the orbit in the xy-plane (physical units)
+plt.figure(figsize=(12, 10))
+plt.plot(positions_lf_physical[:, 0], positions_lf_physical[:, 1], label='Leapfrog', linewidth=1)
+plt.plot(positions_rk4_physical[:, 0], positions_rk4_physical[:, 1], label='RK4', linestyle='--', linewidth=1)
+plt.xlabel('x (kpc)', fontsize=14)
+plt.ylabel('y (kpc)', fontsize=14)
+plt.title('Orbit Trajectory in Galactic Potential', fontsize=16)
+plt.legend(fontsize=12)
+plt.grid(True)
+plt.axis('equal')
+plt.tight_layout()
 plt.show()
 
-# --- Summary Graph 2: 1D Orbit ---
+# Plot the energy errors over time to check energy conservation
+plt.figure(figsize=(12, 10))
+plt.plot(times_physical, E_error_lf, label='Leapfrog', linewidth=1)
+plt.plot(times_physical, E_error_rk4, label='RK4', linestyle='--', linewidth=1)
+plt.xlabel('Time (Myr)', fontsize=14)
+plt.ylabel('Relative Energy Error', fontsize=14)
+plt.title('Energy Conservation Error Over Time', fontsize=16)
+plt.legend(fontsize=12)
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
-# Calculate normalized energy error for 1D motion
-initial_energy_1d = energies_1d[0]
-normalized_energy_error_1d = (energies_1d - initial_energy_1d) / np.abs(initial_energy_1d) * 100  # Percentage error
+# Plot angular momentum errors over time to check conservation
+plt.figure(figsize=(12, 10))
+plt.plot(times_physical, L_error_lf, label='Leapfrog', linewidth=1)
+plt.plot(times_physical, L_error_rk4, label='RK4', linestyle='--', linewidth=1)
+plt.xlabel('Time (Myr)', fontsize=14)
+plt.ylabel('Relative Angular Momentum Error', fontsize=14)
+plt.title('Angular Momentum Conservation Error Over Time', fontsize=16)
+plt.legend(fontsize=12)
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
-# Calculate absolute percentage error of extrema positions
-absolute_percentage_diff_max = np.abs(percentage_diff_max)
-absolute_percentage_diff_min = np.abs(percentage_diff_min)
-
-# Combine maxima and minima absolute percentage differences
-orbit_numbers_max = np.arange(1, len(absolute_percentage_diff_max) + 1)
-orbit_numbers_min = np.arange(1, len(absolute_percentage_diff_min) + 1)
-
-# To avoid log of zero, add epsilon
-normalized_energy_error_1d_safe = np.abs(normalized_energy_error_1d) + epsilon
-absolute_percentage_diff_max_safe = absolute_percentage_diff_max + epsilon
-absolute_percentage_diff_min_safe = absolute_percentage_diff_min + epsilon
-
-# Create the 1D Orbit Summary Figure
-fig_1d, axs_1d = plt.subplots(3, 1, figsize=(12, 18))
-
-# 1. Phase Space Trajectory
-axs_1d[0].plot(positions_1d[:,0], velocities_1d[:,0], color='teal', lw=0.5)
-axs_1d[0].set_xlabel('Position (x)')
-axs_1d[0].set_ylabel('Velocity (v_x)')
-axs_1d[0].set_title('Phase Space Trajectory of 1D Motion')
-axs_1d[0].grid(True, linestyle='--', alpha=0.7)
-
-# 2. Normalized Energy Error Over Time (Log Scale)
-axs_1d[1].plot(times, normalized_energy_error_1d_safe, color='orange', lw=1)
-axs_1d[1].set_xlabel('Time')
-axs_1d[1].set_ylabel('Energy Error (%)')
-axs_1d[1].set_title('Normalized Energy Error Over Time (1D Motion)')
-axs_1d[1].set_yscale('log')  # Set y-axis to logarithmic scale
-axs_1d[1].grid(True, linestyle='--', alpha=0.7, which='both')
-
-# 3. Absolute Percentage Error of Extrema Positions (Log Scale)
-axs_1d[2].plot(orbit_numbers_max, absolute_percentage_diff_max_safe, 'b.-', markersize=3, label='Maxima % Error')
-axs_1d[2].plot(orbit_numbers_min, absolute_percentage_diff_min_safe, 'r.-', markersize=3, label='Minima % Error')
-axs_1d[2].set_xlabel('Orbit Number')
-axs_1d[2].set_ylabel('Absolute Percentage Error (%)')
-axs_1d[2].set_title('Absolute Percentage Error of Extrema Positions')
-axs_1d[2].set_yscale('log')  # Set y-axis to logarithmic scale
-axs_1d[2].legend()
-axs_1d[2].grid(True, linestyle='--', alpha=0.7, which='both')
-
-fig_1d.tight_layout()
+# Plot execution times per step
+plt.figure(figsize=(10, 8))
+methods = ['Leapfrog', 'RK4']
+times_exec = [average_time_lf * 1e3, average_time_rk4 * 1e3]  # Convert to milliseconds
+plt.bar(methods, times_exec, color=['blue', 'orange'])
+plt.ylabel('Average Time per Step (ms)', fontsize=14)
+plt.title('Integrator Execution Time Comparison', fontsize=16)
+for i, v in enumerate(times_exec):
+    plt.text(i, v + 0.01, f"{v:.3f} ms", ha='center', fontsize=12)
+plt.tight_layout()
 plt.show()
