@@ -15,4 +15,4 @@
 
 - Plot energy conservation
 - Plot momentum conservation
-- 
+v - Modify excentricity to see differences of errors between RK4 & leapfrog

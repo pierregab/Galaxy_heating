@@ -266,7 +266,7 @@ v_circular = np.sqrt(G * M * R**2 / (R**2 + (a + np.sqrt(z**2 + b**2))**2)**1.5)
 
 # Initial position and velocity vectors (dimensionless)
 pos_initial = np.array([r0, 0.0, 0.0])       # Starting at x = r0, y = 0, z = 0
-vel_initial = np.array([0.0, v_circular, 0.0])  # Velocity in the y-direction for circular motion
+vel_initial = np.array([0.0, v_circular - 3e-1, 0.0])  # Velocity in the y-direction for circular motion
 
 logging.info(f"Initial conditions:")
 logging.info(f"  Initial position: {pos_initial} (dimensionless)")
@@ -339,14 +339,15 @@ L_error_lf = (angular_momenta_lf_physical - L0_lf) / np.abs(L0_lf)
 E0_rk4 = energies_rk4_physical[0]
 L0_rk4 = angular_momenta_rk4_physical[0]
 
-E_error_rk4 = (energies_rk4_physical - E0_rk4) / np.abs(E0_rk4)
-L_error_rk4 = (angular_momenta_rk4_physical - L0_rk4) / np.abs(L0_rk4)
+E_error_rk4 = np.abs((energies_rk4_physical - E0_rk4) / np.abs(E0_rk4))
+L_error_rk4 = np.abs((angular_momenta_rk4_physical - L0_rk4) / np.abs(L0_rk4))
 
 # ============================================================
 # Plotting Results
 # ============================================================
 
 logging.info("Generating plots.")
+
 
 # Plot the orbit in the xy-plane (physical units)
 plt.figure(figsize=(12, 10))
@@ -359,31 +360,33 @@ plt.legend(fontsize=12)
 plt.grid(True)
 plt.axis('equal')
 plt.tight_layout()
-plt.show()
+plt.savefig('result/orbit_xy_plane.png')
 
 # Plot the energy errors over time to check energy conservation
 plt.figure(figsize=(12, 10))
 plt.plot(times_physical, E_error_lf, label='Leapfrog', linewidth=1)
 plt.plot(times_physical, E_error_rk4, label='RK4', linestyle='--', linewidth=1)
 plt.xlabel('Time (Myr)', fontsize=14)
-plt.ylabel('Relative Energy Error', fontsize=14)
+plt.ylabel('Absolute Energy Error', fontsize=14)
 plt.title('Energy Conservation Error Over Time', fontsize=16)
 plt.legend(fontsize=12)
-plt.grid(True)
+plt.grid(True) 
+# log scale
+plt.yscale('log')
 plt.tight_layout()
-plt.show()
+plt.savefig('result/energy_error.png')
 
 # Plot angular momentum errors over time to check conservation
 plt.figure(figsize=(12, 10))
 plt.plot(times_physical, L_error_lf, label='Leapfrog', linewidth=1)
 plt.plot(times_physical, L_error_rk4, label='RK4', linestyle='--', linewidth=1)
 plt.xlabel('Time (Myr)', fontsize=14)
-plt.ylabel('Relative Angular Momentum Error', fontsize=14)
+plt.ylabel('Absolute Angular Momentum Error', fontsize=14)
 plt.title('Angular Momentum Conservation Error Over Time', fontsize=16)
 plt.legend(fontsize=12)
 plt.grid(True)
 plt.tight_layout()
-plt.show()
+plt.savefig('result/angular_momentum_error.png')
 
 # Plot execution times per step
 plt.figure(figsize=(10, 8))
@@ -393,6 +396,6 @@ plt.bar(methods, times_exec, color=['blue', 'orange'])
 plt.ylabel('Average Time per Step (ms)', fontsize=14)
 plt.title('Integrator Execution Time Comparison', fontsize=16)
 for i, v in enumerate(times_exec):
-    plt.text(i, v + 0.01, f"{v:.3f} ms", ha='center', fontsize=12)
+    plt.text(i, 0.5, f"{v:.3f} ms", ha='center', fontsize=12)
 plt.tight_layout()
-plt.show()
+plt.savefig('result/execution_times.png')
