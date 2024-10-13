@@ -17,7 +17,7 @@ logging.info("Starting the simulation with the following properties:")
 # Physical Units (Astrophysical Units)
 # ------------------------------------------------------------
 # - Mass Unit (M0): 1 x 10^11 solar masses (Msun)
-# - Length Unit (R0): 2.5 kiloparsecs (kpc)
+# - Length Unit (R0): 1 kiloparsecs (kpc)
 # - Time Unit (T0): Derived from R0 and M0 using G
 # - Velocity Unit (V0): Derived from R0 and T0
 
