@@ -9,5 +9,6 @@ class Perturber(System):
         - setMass
         - setPos
     '''
-    def __init__(*args, **kwargs) -> None:
+    def __init__(self, mass:float, *args, **kwargs) -> None:
+        super.__init__(self, mass)
         pass

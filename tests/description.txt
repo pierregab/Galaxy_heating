@@ -16,3 +16,9 @@ o - One-star "spring motion" trajectory
 v - Plot energy conservation
 v - Plot momentum conservation
 v - Modify excentricity to see differences of errors between RK4 & leapfrog
+
+
+Velocity distribution (phi et z)
+Vectorisation
+Perturbation
+
