@@ -17,7 +17,7 @@ logging.info("Starting the simulation with the following properties:")
 # Physical Units (Astrophysical Units)
 # ------------------------------------------------------------
 # - Mass Unit (M0): 1 x 10^11 solar masses (Msun)
-# - Length Unit (R0): 2.5 kiloparsecs (kpc)
+# - Length Unit (R0): 1 kiloparsecs (kpc)
 # - Time Unit (T0): Derived from R0 and M0 using G
 # - Velocity Unit (V0): Derived from R0 and T0
 
@@ -70,7 +70,7 @@ velocity_scale_kms = V0_kms  # Velocity unit in km/s
 # Time Parameters (Dimensionless Units)
 # ============================================================
 
-dt = 0.001     # Time step (dimensionless)
+dt = 0.05   # Time step (dimensionless)
 t_max = 250.0   # Total simulation time (dimensionless)
 steps = int(t_max / dt)  # Number of integration steps
 
@@ -266,7 +266,7 @@ v_circular = np.sqrt(G * M * R**2 / (R**2 + (a + np.sqrt(z**2 + b**2))**2)**1.5)
 
 # Initial position and velocity vectors (dimensionless)
 pos_initial = np.array([r0, 0.0, 0.0])       # Starting at x = r0, y = 0, z = 0
-vel_initial = np.array([0.0, v_circular - 3e-1, 0.0])  # Velocity in the y-direction for circular motion
+vel_initial = np.array([0.0, v_circular, 0.0])  # Velocity in the y-direction for circular motion
 
 logging.info(f"Initial conditions:")
 logging.info(f"  Initial position: {pos_initial} (dimensionless)")
