@@ -7,6 +7,9 @@ import os  # Import the os module for directory operations
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Change dpi setting for higher resolution plots
+plt.rcParams['figure.dpi'] = 150
+
 # ============================================================
 # Unit Definitions and Scaling Factors
 # ============================================================
@@ -210,9 +213,10 @@ class Galaxy(System):
         b = self.b
         denom = R**2 + (a + b)**2
         Omega = self.omega(R)
-        term1 = 2 * Omega**2
-        term2 = (R**2 * (self.G * self.M * (denom**-3) * (1 - 3 * R**2 / denom))) / R**2
-        kappa_squared = term1 + term2
+        # Correct formula for kappa^2 in terms of potential derivatives
+        dPhidr = self.dPhidr(R)
+        d2Phidr2 = ( -self.G * self.M / (denom)**3 ) * (1 - 3 * R**2 / denom)
+        kappa_squared = 4 * Omega**2 + R * d2Phidr2
         kappa_squared = np.maximum(kappa_squared, 0)  # Avoid negative values due to numerical errors
         return np.sqrt(kappa_squared)
 
@@ -249,7 +253,7 @@ class Galaxy(System):
         v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
 
         # Angular frequency Omega
-        Omega = v_c / R
+        Omega = self.omega(R)
 
         # Epicyclic frequency kappa
         kappa = self.kappa(R)
@@ -280,6 +284,9 @@ class Galaxy(System):
             idx_unbound = np.where(unbound)[0]
             num_unbound = len(idx_unbound)
 
+            if num_unbound == 0:
+                break  # All stars are bound
+
             v_R_new = np.random.normal(0, sigma_R[idx_unbound])
             v_z_new = np.random.normal(0, sigma_z[idx_unbound])
             v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
@@ -309,10 +316,12 @@ class Galaxy(System):
             v_z[bound_indices] = v_z_new[~unbound_new]
             v_phi[bound_indices] = v_phi_new[~unbound_new]
 
+            logging.info(f"  {np.sum(~unbound_new)} stars bound in this iteration.")
             iterations += 1
 
         if iterations == max_iterations and np.any(unbound):
-            logging.warning(f"Maximum iterations reached. {np.sum(unbound)} stars remain unbound.")
+            num_remaining = np.sum(unbound)
+            logging.warning(f"Maximum iterations reached. {num_remaining} stars remain unbound.")
             # Remove unbound stars
             idx_bound = np.where(~unbound)[0]
             R = R[idx_bound]
@@ -600,36 +609,82 @@ class Simulation(System):
 
         logging.info("Simulation completed.")
 
-    def plot_trajectories(self):
+    def plot_trajectories(self, subset=100):
         """
-        Plot the orbit trajectories in the xy-plane.
+        Plot the orbit trajectories in the xy-plane and xz-plane separately for each integrator.
+
+        Parameters:
+            subset (int): Number of stars to plot for clarity. Defaults to 100.
         """
-        logging.info("Generating orbit trajectory plot.")
+        logging.info("Generating orbit trajectory plots.")
 
         N = len(self.galaxy.particles)
+        subset = min(subset, N)  # Ensure subset does not exceed total number of stars
+        indices = np.random.choice(N, subset, replace=False)  # Randomly select stars to plot
 
-        # Leapfrog: Convert positions to physical units
-        positions_lf_physical = self.positions_lf * self.length_scale  # [steps, N, 3]
+        # Leapfrog Orbits
+        plt.figure(figsize=(12, 6))
 
-        # RK4: Convert positions to physical units
-        positions_rk4_physical = self.positions_rk4 * self.length_scale  # [steps, N, 3]
-
-        plt.figure(figsize=(12, 10))
-        for i in range(N):
-            plt.plot(positions_lf_physical[:, i, 0], positions_lf_physical[:, i, 1],
-                     label='Leapfrog' if i == 0 else "", linewidth=0.5, alpha=0.7)
-            plt.plot(positions_rk4_physical[:, i, 0], positions_rk4_physical[:, i, 1],
-                     label='RK4' if i == 0 else "", linestyle='--', linewidth=0.5, alpha=0.7)
-
-        plt.xlabel('x (kpc)', fontsize=14)
-        plt.ylabel('y (kpc)', fontsize=14)
-        plt.title('Orbit Trajectories in Galactic Potential', fontsize=16)
-        plt.legend(fontsize=12)
+        # x-y plot
+        plt.subplot(1, 2, 1)
+        for i in indices:
+            plt.plot(self.positions_lf[:, i, 0] * self.length_scale,
+                     self.positions_lf[:, i, 1] * self.length_scale,
+                     linewidth=0.5, alpha=0.7)
+        plt.xlabel('x (kpc)', fontsize=12)
+        plt.ylabel('y (kpc)', fontsize=12)
+        plt.title('Leapfrog: Orbit Trajectories in x-y Plane', fontsize=14)
         plt.grid(True)
         plt.axis('equal')
+
+        # x-z plot
+        plt.subplot(1, 2, 2)
+        for i in indices:
+            plt.plot(self.positions_lf[:, i, 0] * self.length_scale,
+                     self.positions_lf[:, i, 2] * self.length_scale,
+                     linewidth=0.5, alpha=0.7)
+        plt.xlabel('x (kpc)', fontsize=12)
+        plt.ylabel('z (kpc)', fontsize=12)
+        plt.title('Leapfrog: Orbit Trajectories in x-z Plane', fontsize=14)
+        plt.grid(True)
+        plt.axis('equal')
+
         plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'orbit_xy_plane.png'))
-        logging.info(f"Orbit trajectory plot saved to '{self.results_dir}/orbit_xy_plane.png'.")
+        plt.savefig(os.path.join(self.results_dir, 'orbit_leapfrog.png'))
+        plt.close()
+        logging.info(f"Leapfrog orbit trajectories plots saved to '{self.results_dir}/orbit_leapfrog.png'.")
+
+        # RK4 Orbits
+        plt.figure(figsize=(12, 6))
+
+        # x-y plot
+        plt.subplot(1, 2, 1)
+        for i in indices:
+            plt.plot(self.positions_rk4[:, i, 0] * self.length_scale,
+                     self.positions_rk4[:, i, 1] * self.length_scale,
+                     linewidth=0.5, alpha=0.7)
+        plt.xlabel('x (kpc)', fontsize=12)
+        plt.ylabel('y (kpc)', fontsize=12)
+        plt.title('RK4: Orbit Trajectories in x-y Plane', fontsize=14)
+        plt.grid(True)
+        plt.axis('equal')
+
+        # x-z plot
+        plt.subplot(1, 2, 2)
+        for i in indices:
+            plt.plot(self.positions_rk4[:, i, 0] * self.length_scale,
+                     self.positions_rk4[:, i, 2] * self.length_scale,
+                     linewidth=0.5, alpha=0.7)
+        plt.xlabel('x (kpc)', fontsize=12)
+        plt.ylabel('z (kpc)', fontsize=12)
+        plt.title('RK4: Orbit Trajectories in x-z Plane', fontsize=14)
+        plt.grid(True)
+        plt.axis('equal')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.results_dir, 'orbit_rk4.png'))
+        plt.close()
+        logging.info(f"RK4 orbit trajectories plots saved to '{self.results_dir}/orbit_rk4.png'.")
 
     def plot_energy_error(self):
         """
@@ -652,7 +707,7 @@ class Simulation(System):
         avg_E_error_lf = np.mean(np.abs(E_error_lf), axis=1)  # [steps]
         avg_E_error_rk4 = np.mean(np.abs(E_error_rk4), axis=1)  # [steps]
 
-        plt.figure(figsize=(12, 10))
+        plt.figure(figsize=(12, 8))
         plt.plot(times_physical, avg_E_error_lf, label='Leapfrog', linewidth=1)
         plt.plot(times_physical, avg_E_error_rk4, label='RK4', linestyle='--', linewidth=1)
         plt.xlabel('Time (Myr)', fontsize=14)
@@ -663,6 +718,7 @@ class Simulation(System):
         plt.yscale('log')
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, 'energy_error.png'))
+        plt.close()
         logging.info(f"Energy conservation error plot saved to '{self.results_dir}/energy_error.png'.")
 
     def plot_angular_momentum_error(self):
@@ -685,7 +741,7 @@ class Simulation(System):
         avg_L_error_lf = np.mean(np.abs(L_error_lf), axis=1)  # [steps]
         avg_L_error_rk4 = np.mean(np.abs(L_error_rk4), axis=1)  # [steps]
 
-        plt.figure(figsize=(12, 10))
+        plt.figure(figsize=(12, 8))
         plt.plot(times_physical, avg_L_error_lf, label='Leapfrog', linewidth=1)
         plt.plot(times_physical, avg_L_error_rk4, label='RK4', linestyle='--', linewidth=1)
         plt.xlabel('Time (Myr)', fontsize=14)
@@ -695,6 +751,7 @@ class Simulation(System):
         plt.grid(True)
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, 'angular_momentum_error.png'))
+        plt.close()
         logging.info(f"Angular momentum conservation error plot saved to '{self.results_dir}/angular_momentum_error.png'.")
 
     def plot_execution_time(self):
@@ -713,6 +770,7 @@ class Simulation(System):
             plt.text(i, v + 0.05 * max(times_exec), f"{v:.3f} ms", ha='center', fontsize=12)
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, 'execution_times.png'))
+        plt.close()
         logging.info(f"Execution time comparison plot saved to '{self.results_dir}/execution_times.png'.")
 
 
@@ -722,7 +780,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 1000  # You can adjust this number as needed
+    N_stars = 100  # You can adjust this number as needed
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
@@ -747,7 +805,7 @@ def main():
     # ============================================================
 
     # Generate plots using the Simulation class methods
-    simulation.plot_trajectories()
+    simulation.plot_trajectories(subset=100)  # Plot a subset of 100 stars for clarity
     simulation.plot_energy_error()
     simulation.plot_angular_momentum_error()
     simulation.plot_execution_time()
