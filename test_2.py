@@ -99,7 +99,7 @@ class Galaxy(System):
         set_b(b): Set the vertical scale length.
         potential(R, z): Compute the gravitational potential at (R, z).
         acceleration(pos): Compute the acceleration at position pos.
-        initialize_stars(N, Rmax): Initialize N stars with positions drawn from uniform distributions.
+        initialize_stars(N, Rmax): Initialize N stars with positions drawn from the Schwarzschild distribution.
     """
 
     def __init__(self, mass=1.0, a=2.0, b=None):
@@ -119,36 +119,6 @@ class Galaxy(System):
 
         # Initialize list to hold Particle instances
         self.particles = []
-
-    def set_mass(self, mass):
-        """
-        Set the mass of the galaxy.
-
-        Parameters:
-            mass (float): Mass of the galaxy (normalized).
-        """
-        self.M = mass
-        logging.info(f"Galaxy mass set to {self.M} (normalized)")
-
-    def set_a(self, a):
-        """
-        Set the radial scale length.
-
-        Parameters:
-            a (float): Radial scale length (normalized to R0).
-        """
-        self.a = a
-        logging.info(f"Radial scale length (a) set to {self.a} (dimensionless)")
-
-    def set_b(self, b):
-        """
-        Set the vertical scale length.
-
-        Parameters:
-            b (float): Vertical scale length (normalized).
-        """
-        self.b = b
-        logging.info(f"Vertical scale length (b) set to {self.b} (dimensionless)")
 
     def potential(self, R, z):
         """
@@ -188,42 +158,188 @@ class Galaxy(System):
         az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
         return np.array([ax, ay, az])
 
-    def initialize_stars(self, N, Rmax):
+    def dPhidr(self, R, z=0):
         """
-        Initialize N stars with positions drawn from uniform distributions.
+        Compute the derivative of the potential with respect to R at given R and z.
+
+        Parameters:
+            R : float or np.ndarray
+                Radial distance(s) (dimensionless).
+            z : float or np.ndarray
+                Vertical distance(s) (dimensionless), default is 0.
+
+        Returns:
+            float or np.ndarray
+                dPhi/dR evaluated at each (R, z).
+        """
+        a = self.a
+        b = self.b
+        denom = np.sqrt(R**2 + (a + np.sqrt(z**2 + b**2))**2)
+        dPhi_dR = -self.G * self.M * R / denom**3
+        return dPhi_dR
+
+    def omega(self, R):
+        """
+        Compute the angular frequency Omega at radius R.
+
+        Parameters:
+            R : float or np.ndarray
+                Radial distance(s) (dimensionless).
+
+        Returns:
+            float or np.ndarray
+                Angular frequency Omega at each R.
+        """
+        dPhi_dR = self.dPhidr(R)
+        Omega = np.sqrt(R * (-dPhi_dR)) / R
+        return Omega
+
+    def kappa(self, R):
+        """
+        Compute the epicyclic frequency kappa at radius R.
+
+        Parameters:
+            R : float or np.ndarray
+                Radial distance(s) (dimensionless).
+
+        Returns:
+            float or np.ndarray
+                Epicyclic frequency kappa at each R.
+        """
+        a = self.a
+        b = self.b
+        denom = R**2 + (a + b)**2
+        Omega = self.omega(R)
+        term1 = 2 * Omega**2
+        term2 = (R**2 * (self.G * self.M * (denom**-3) * (1 - 3 * R**2 / denom))) / R**2
+        kappa_squared = term1 + term2
+        kappa_squared = np.maximum(kappa_squared, 0)  # Avoid negative values due to numerical errors
+        return np.sqrt(kappa_squared)
+
+    def initialize_stars(self, N, Rmax, alpha=0.05, q=0.6, max_iterations=100):
+        """
+        Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
 
         Parameters:
             N (int): Number of stars to initialize.
             Rmax (float): Maximum radial distance (dimensionless).
+            alpha (float): Small parameter for radial displacement (default: 0.05).
+            q (float): Ratio of sigma_z to sigma_R (default: 0.6).
+            max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
         """
-        logging.info(f"Initializing {N} stars with uniform R in [0, {Rmax}] and phi in [0, 2π].")
-        R = np.random.uniform(0, Rmax, N)  # Radial distances
-        phi = np.random.uniform(0, 2 * np.pi, N)  # Angular positions
+        logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
 
-        # Convert polar coordinates to Cartesian coordinates (x, y)
-        x = R * np.cos(phi)
-        y = R * np.sin(phi)
-        z = np.zeros(N)  # All stars lie in the galactic plane
+        # Generate positions
+        R_c = np.random.uniform(0.5 * Rmax, Rmax, N)  # Reference radii
+        phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
 
-        # Calculate the circular velocity needed for a stable orbit for each star
-        # v_circular = sqrt(G * M * R^2 / (R^2 + (a + b)^2)**1.5)
-        v_circular = np.sqrt(self.G * self.M * R**2 / (R**2 + (self.a + self.b)**2)**1.5)  # [N]
+        # Small radial displacements x = R - R_c
+        x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
+        R = R_c + x                                         # Actual radial positions
 
-        # Initialize velocities perpendicular to the radius vector for circular orbits
-        # v_x = -v_circular * sin(phi), v_y = v_circular * cos(phi)
-        v_x = -v_circular * np.sin(phi)
-        v_y = v_circular * np.cos(phi)
-        v_z = np.zeros(N)  # No vertical velocity
+        # Ensure R is positive
+        R = np.abs(R)
+
+        # Positions in Cartesian coordinates
+        x_pos = R * np.cos(phi)
+        y_pos = R * np.sin(phi)
+        z_pos = np.zeros(N)  # All stars lie in the galactic plane
+
+        # Compute circular velocity at R
+        v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
+
+        # Angular frequency Omega
+        Omega = v_c / R
+
+        # Epicyclic frequency kappa
+        kappa = self.kappa(R)
+        kappa_squared = kappa**2
+
+        # Gamma parameter
+        gamma = 2 * Omega / kappa
+
+        # Corrected Radial velocity dispersion sigma_R
+        sigma_R_squared = (4/3) * kappa_squared * (alpha**2) * R_c**2
+        sigma_R = np.sqrt(sigma_R_squared)
+
+        # Vertical velocity dispersion sigma_z
+        sigma_z = q * sigma_R  # Simple proportionality
+
+        # Initialize arrays for velocities
+        v_R = np.zeros(N)
+        v_phi = np.zeros(N)
+        v_z = np.zeros(N)
+
+        iterations = 0
+        unbound = np.ones(N, dtype=bool)  # Initially, all stars are unbound to enter the loop
+
+        while np.any(unbound) and iterations < max_iterations:
+            logging.info(f"Velocity generation iteration {iterations + 1}")
+
+            # Generate velocities for unbound stars
+            idx_unbound = np.where(unbound)[0]
+            num_unbound = len(idx_unbound)
+
+            v_R_new = np.random.normal(0, sigma_R[idx_unbound])
+            v_z_new = np.random.normal(0, sigma_z[idx_unbound])
+            v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
+
+            # Compute angular momentum L_z for these stars
+            L_z_new = R[idx_unbound] * v_phi_new
+
+            # Compute total mechanical energy per unit mass
+            kinetic_energy_new = 0.5 * (v_R_new**2 + v_z_new**2)        # Radial and vertical kinetic energy
+            rotational_energy_new = 0.5 * (L_z_new**2) / R[idx_unbound]**2      # Rotational kinetic energy
+            potential_energy_new = self.potential(R[idx_unbound], z_pos[idx_unbound])     # Gravitational potential
+            E_total_new = kinetic_energy_new + rotational_energy_new + potential_energy_new  # [N]
+
+            # Compute escape speed squared
+            escape_speed_squared = -2 * potential_energy_new
+
+            # Total speed squared
+            total_speed_squared = v_R_new**2 + v_phi_new**2 + v_z_new**2
+
+            # Identify stars with total energy >= 0 or speed exceeding escape speed
+            unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
+            unbound[idx_unbound] = unbound_new
+
+            # Update velocities for bound stars
+            bound_indices = idx_unbound[~unbound_new]
+            v_R[bound_indices] = v_R_new[~unbound_new]
+            v_z[bound_indices] = v_z_new[~unbound_new]
+            v_phi[bound_indices] = v_phi_new[~unbound_new]
+
+            iterations += 1
+
+        if iterations == max_iterations and np.any(unbound):
+            logging.warning(f"Maximum iterations reached. {np.sum(unbound)} stars remain unbound.")
+            # Remove unbound stars
+            idx_bound = np.where(~unbound)[0]
+            R = R[idx_bound]
+            phi = phi[idx_bound]
+            x_pos = x_pos[idx_bound]
+            y_pos = y_pos[idx_bound]
+            z_pos = z_pos[idx_bound]
+            v_R = v_R[idx_bound]
+            v_phi = v_phi[idx_bound]
+            v_z = v_z[idx_bound]
+            N = len(idx_bound)
+            logging.info(f"Proceeding with {N} bound stars.")
+        else:
+            logging.info(f"All {N} stars initialized as bound orbits.")
+
+        # Convert velocities to Cartesian coordinates
+        v_x = v_R * np.cos(phi) - v_phi * np.sin(phi)
+        v_y = v_R * np.sin(phi) + v_phi * np.cos(phi)
 
         # Create Particle instances
         for i in range(N):
-            position = np.array([x[i], y[i], z[i]])  # [x, y, z]
-            velocity = np.array([v_x[i], v_y[i], v_z[i]])  # [vx, vy, vz]
+            position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
+            velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
             particle = Particle(position, velocity)
             self.particles.append(particle)
 
-        logging.info(f"Initialized {N} stars successfully.")
-
+        logging.info(f"Initialization complete with {N} particles.")
 
 class Particle:
     """
@@ -243,7 +359,7 @@ class Particle:
         self.velocity = np.copy(velocity)
         self.energy = None
         self.angular_momentum = None
-        logging.info(f"Particle initialized with position {self.position} and velocity {self.velocity}.")
+        logging.debug(f"Particle initialized with position {self.position} and velocity {self.velocity}.")
 
     def reset(self):
         """
@@ -294,7 +410,7 @@ class Integrator:
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
 
         # Calculate initial half-step velocities
-        acc = galaxy.acceleration(pos.T).T  # [N, 3]
+        acc = np.array([galaxy.acceleration(particle.position) for particle in particles])  # [N, 3]
         vel_half = vel + 0.5 * dt * acc  # [N, 3]
 
         for i in range(steps):
@@ -303,7 +419,7 @@ class Integrator:
             positions[i] = pos
 
             # Calculate acceleration at new positions
-            acc = galaxy.acceleration(pos.T).T  # [N, 3]
+            acc = np.array([galaxy.acceleration(p) for p in pos])  # [N, 3]
 
             # Update half-step velocities
             vel_half += dt * acc  # [N, 3]
@@ -316,7 +432,7 @@ class Integrator:
             v = np.linalg.norm(vel_full, axis=1)  # [N]
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
-            potential_energy = galaxy.potential(R, z)  # [N]
+            potential_energy = galaxy.potential(R, z)     # [N]
             kinetic_energy = 0.5 * v**2  # [N]
             energies[i] = kinetic_energy + potential_energy  # [N]
 
@@ -361,22 +477,22 @@ class Integrator:
 
         for i in range(steps):
             # k1
-            acc1 = galaxy.acceleration(pos.T).T  # [N, 3]
+            acc1 = np.array([galaxy.acceleration(p) for p in pos])  # [N, 3]
             k1_vel = dt * acc1  # [N, 3]
             k1_pos = dt * vel  # [N, 3]
 
             # k2
-            acc2 = galaxy.acceleration((pos + 0.5 * k1_pos).T).T  # [N, 3]
+            acc2 = np.array([galaxy.acceleration(p) for p in pos + 0.5 * k1_pos])  # [N, 3]
             k2_vel = dt * acc2  # [N, 3]
             k2_pos = dt * (vel + 0.5 * k1_vel)  # [N, 3]
 
             # k3
-            acc3 = galaxy.acceleration((pos + 0.5 * k2_pos).T).T  # [N, 3]
+            acc3 = np.array([galaxy.acceleration(p) for p in pos + 0.5 * k2_pos])  # [N, 3]
             k3_vel = dt * acc3  # [N, 3]
             k3_pos = dt * (vel + 0.5 * k2_vel)  # [N, 3]
 
             # k4
-            acc4 = galaxy.acceleration((pos + k3_pos).T).T  # [N, 3]
+            acc4 = np.array([galaxy.acceleration(p) for p in pos + k3_pos])  # [N, 3]
             k4_vel = dt * acc4  # [N, 3]
             k4_pos = dt * (vel + k3_vel)  # [N, 3]
 
@@ -391,7 +507,7 @@ class Integrator:
             v = np.linalg.norm(vel, axis=1)  # [N]
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
-            potential_energy = galaxy.potential(R, z)  # [N]
+            potential_energy = galaxy.potential(R, z)     # [N]
             kinetic_energy = 0.5 * v**2  # [N]
             energies[i] = kinetic_energy + potential_energy  # [N]
 
@@ -524,16 +640,13 @@ class Simulation(System):
         # Time array in physical units
         times_physical = self.times * self.time_scale  # Time in Myr
 
-        # Convert energies to physical units
-        energies_lf_physical = self.energies_lf * self.velocity_scale_kms**2  # [steps, N]
-        energies_rk4_physical = self.energies_rk4 * self.velocity_scale_kms**2  # [steps, N]
+        # Compute total energy for Leapfrog
+        E0_lf = self.energies_lf[0]  # [N]
+        E_error_lf = (self.energies_lf - E0_lf) / np.abs(E0_lf)  # [steps, N]
 
-        # Compute energy errors
-        E0_lf = energies_lf_physical[0]  # [N]
-        E_error_lf = (energies_lf_physical - E0_lf) / np.abs(E0_lf)  # [steps, N]
-
-        E0_rk4 = energies_rk4_physical[0]  # [N]
-        E_error_rk4 = (energies_rk4_physical - E0_rk4) / np.abs(E0_rk4)  # [steps, N]
+        # Compute total energy for RK4
+        E0_rk4 = self.energies_rk4[0]  # [N]
+        E_error_rk4 = (self.energies_rk4 - E0_rk4) / np.abs(E0_rk4)  # [steps, N]
 
         # Compute average energy error across all stars
         avg_E_error_lf = np.mean(np.abs(E_error_lf), axis=1)  # [steps]
@@ -561,16 +674,12 @@ class Simulation(System):
         # Time array in physical units
         times_physical = self.times * self.time_scale  # Time in Myr
 
-        # Convert angular momenta to physical units
-        angular_momenta_lf_physical = self.angular_momenta_lf * self.length_scale * self.velocity_scale_kms  # [steps, N]
-        angular_momenta_rk4_physical = self.angular_momenta_rk4 * self.length_scale * self.velocity_scale_kms  # [steps, N]
-
         # Compute angular momentum errors
-        L0_lf = angular_momenta_lf_physical[0]  # [N]
-        L_error_lf = (angular_momenta_lf_physical - L0_lf) / np.abs(L0_lf)  # [steps, N]
+        L0_lf = self.angular_momenta_lf[0]  # [N]
+        L_error_lf = (self.angular_momenta_lf - L0_lf) / np.abs(L0_lf)  # [steps, N]
 
-        L0_rk4 = angular_momenta_rk4_physical[0]  # [N]
-        L_error_rk4 = (angular_momenta_rk4_physical - L0_rk4) / np.abs(L0_rk4)  # [steps, N]
+        L0_rk4 = self.angular_momenta_rk4[0]  # [N]
+        L_error_rk4 = (self.angular_momenta_rk4 - L0_rk4) / np.abs(L0_rk4)  # [steps, N]
 
         # Compute average angular momentum error across all stars
         avg_L_error_lf = np.mean(np.abs(L_error_lf), axis=1)  # [steps]
@@ -613,7 +722,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 10000  # You can adjust this number as needed
+    N_stars = 1000  # You can adjust this number as needed
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
@@ -624,8 +733,8 @@ def main():
     # Create Galaxy instance
     galaxy = Galaxy(mass=1.0, a=2.0, b=0.1)
 
-    # Initialize stars with uniform R and phi distributions
-    galaxy.initialize_stars(N=N_stars, Rmax=Rmax)
+    # Initialize stars with the Schwarzschild velocity distribution
+    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, q=0.6, max_iterations=100)
 
     # Create Simulation instance
     simulation = Simulation(galaxy=galaxy, dt=0.05, t_max=250.0)
@@ -646,4 +755,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
