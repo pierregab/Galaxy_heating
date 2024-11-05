@@ -4,6 +4,7 @@ import logging
 from scipy.stats import norm
 import timeit
 import os  # Import the os module for directory operations
+import concurrent.futures  # Import concurrent.futures for parallel execution
 
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -143,24 +144,26 @@ class Galaxy(System):
 
     def acceleration(self, pos):
         """
-        Compute the acceleration vector at a given position in the galaxy.
+        Compute the acceleration vectors at given positions.
 
         Parameters:
             pos : np.ndarray
-                Position vector [x, y, z] in dimensionless units.
+                Array of positions [N, 3].
 
         Returns:
             np.ndarray
-                Acceleration vector [ax, ay, az] in dimensionless units.
+                Array of acceleration vectors [N, 3].
         """
-        x, y, z = pos
+        x = pos[:, 0]
+        y = pos[:, 1]
+        z = pos[:, 2]
         R = np.sqrt(x**2 + y**2)
         z_term = np.sqrt(z**2 + self.b**2)
         denom = (R**2 + (self.a + z_term)**2)**1.5
         ax = -self.G * self.M * x / denom
         ay = -self.G * self.M * y / denom
         az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
-        return np.array([ax, ay, az])
+        return np.stack((ax, ay, az), axis=-1)
 
     def dPhidr(self, R, z=0):
         """
@@ -434,28 +437,11 @@ class Particle:
 class Integrator:
     """
     Integrator class containing integration methods.
-
-    Methods:
-        leapfrog(particles, galaxy, dt, steps): Perform leapfrog integration.
-        rk4(particles, galaxy, dt, steps): Perform RK4 integration.
     """
 
     def leapfrog(self, particles, galaxy, dt, steps):
         """
         Leapfrog integrator for orbit simulation.
-
-        Parameters:
-            particles (list of Particle): List of Particle instances with initial positions and velocities.
-            galaxy (Galaxy): Galaxy instance providing potential and acceleration.
-            dt (float): Time step (dimensionless).
-            steps (int): Number of integration steps.
-
-        Returns:
-            tuple:
-                positions (np.ndarray): Positions over time [steps, N, 3].
-                velocities (np.ndarray): Velocities over time [steps, N, 3].
-                energies (np.ndarray): Total energy over time [steps, N].
-                angular_momenta (np.ndarray): Angular momentum (Lz) over time [steps, N].
         """
         logging.info("Starting Leapfrog integration.")
         N = len(particles)
@@ -469,7 +455,7 @@ class Integrator:
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
 
         # Calculate initial half-step velocities
-        acc = np.array([galaxy.acceleration(particle.position) for particle in particles])  # [N, 3]
+        acc = galaxy.acceleration(pos)  # [N, 3]
         vel_half = vel + 0.5 * dt * acc  # [N, 3]
 
         for i in range(steps):
@@ -478,7 +464,7 @@ class Integrator:
             positions[i] = pos
 
             # Calculate acceleration at new positions
-            acc = np.array([galaxy.acceleration(p) for p in pos])  # [N, 3]
+            acc = galaxy.acceleration(pos)  # [N, 3]
 
             # Update half-step velocities
             vel_half += dt * acc  # [N, 3]
@@ -509,19 +495,6 @@ class Integrator:
     def rk4(self, particles, galaxy, dt, steps):
         """
         Runge-Kutta 4th order integrator for orbit simulation.
-
-        Parameters:
-            particles (list of Particle): List of Particle instances with initial positions and velocities.
-            galaxy (Galaxy): Galaxy instance providing potential and acceleration.
-            dt (float): Time step (dimensionless).
-            steps (int): Number of integration steps.
-
-        Returns:
-            tuple:
-                positions (np.ndarray): Positions over time [steps, N, 3].
-                velocities (np.ndarray): Velocities over time [steps, N, 3].
-                energies (np.ndarray): Total energy over time [steps, N].
-                angular_momenta (np.ndarray): Angular momentum (Lz) over time [steps, N].
         """
         logging.info("Starting RK4 integration.")
         N = len(particles)
@@ -536,22 +509,22 @@ class Integrator:
 
         for i in range(steps):
             # k1
-            acc1 = np.array([galaxy.acceleration(p) for p in pos])  # [N, 3]
+            acc1 = galaxy.acceleration(pos)  # [N, 3]
             k1_vel = dt * acc1  # [N, 3]
             k1_pos = dt * vel  # [N, 3]
 
             # k2
-            acc2 = np.array([galaxy.acceleration(p + 0.5 * k1_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
+            acc2 = galaxy.acceleration(pos + 0.5 * k1_pos)  # [N, 3]
             k2_vel = dt * acc2  # [N, 3]
             k2_pos = dt * (vel + 0.5 * k1_vel)  # [N, 3]
 
             # k3
-            acc3 = np.array([galaxy.acceleration(p + 0.5 * k2_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
+            acc3 = galaxy.acceleration(pos + 0.5 * k2_pos)  # [N, 3]
             k3_vel = dt * acc3  # [N, 3]
             k3_pos = dt * (vel + 0.5 * k2_vel)  # [N, 3]
 
             # k4
-            acc4 = np.array([galaxy.acceleration(p + k3_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
+            acc4 = galaxy.acceleration(pos + k3_pos)  # [N, 3]
             k4_vel = dt * acc4  # [N, 3]
             k4_pos = dt * (vel + k3_vel)  # [N, 3]
 
@@ -580,6 +553,7 @@ class Integrator:
 
         logging.info("RK4 integration completed.")
         return positions, velocities, energies, angular_momenta
+
 
 
 class Simulation(System):
