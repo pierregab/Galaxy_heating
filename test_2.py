@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
+from scipy.stats import norm
 import timeit
 import os  # Import the os module for directory operations
 
@@ -219,156 +220,184 @@ class Galaxy(System):
         kappa_squared = 4 * Omega**2 + R * d2Phidr2
         kappa_squared = np.maximum(kappa_squared, 0)  # Avoid negative values due to numerical errors
         return np.sqrt(kappa_squared)
-
-    def initialize_stars(self, N, Rmax, alpha=0.05, q=0.6, max_iterations=100):
+    
+    def rho(self, R, z=0):
         """
-        Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
+        Compute the mass density rho at a given R and z for the Miyamoto-Nagai potential.
 
         Parameters:
-            N (int): Number of stars to initialize.
-            Rmax (float): Maximum radial distance (dimensionless).
-            alpha (float): Small parameter for radial displacement (default: 0.05).
-            q (float): Ratio of sigma_z to sigma_R (default: 0.6).
-            max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
+            R : float or np.ndarray
+                Radial distance(s) (dimensionless).
+            z : float or np.ndarray
+                Vertical distance(s) (dimensionless), default is 0.
+
+        Returns:
+            float or np.ndarray
+                Mass density rho at the specified location.
         """
-        logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
+        a = self.a
+        b = self.b
+        M = self.M
 
-        # Generate positions
-        R_c = np.random.uniform(0.5 * Rmax, Rmax, N)  # Reference radii
-        phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
+        # Compute terms
+        D = np.sqrt(z**2 + b**2)
+        denom = (R**2 + (a + D)**2)**(2.5)
+        numerator = a * R**2 + (a + 3 * D) * (a + D)**2
+        rho = M * b**2 * numerator / (4 * np.pi * denom * D**3)
+        return rho
 
-        # Small radial displacements x = R - R_c
-        x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
-        R = R_c + x                                         # Actual radial positions
+    def initialize_stars(self, N, Rmax, alpha=0.05, max_iterations=100):
+            """
+            Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
 
-        # Ensure R is positive
-        R = np.abs(R)
+            Parameters:
+                N (int): Number of stars to initialize.
+                Rmax (float): Maximum radial distance (dimensionless).
+                alpha (float): Small parameter for radial displacement (default: 0.05).
+                max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
+            """
+            logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
 
-        # Positions in Cartesian coordinates
-        x_pos = R * np.cos(phi)
-        y_pos = R * np.sin(phi)
-        z_pos = np.zeros(N)  # All stars lie in the galactic plane
+            # Generate positions
+            R_c = np.random.uniform(0, Rmax, N)  # Reference radii
+            phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
 
-        # Compute circular velocity at R
-        v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
+            # Small radial displacements x = R - R_c
+            x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
+            R = R_c + x                                         # Actual radial positions
 
-        # Angular frequency Omega
-        Omega = self.omega(R)
+            # Ensure R is positive
+            R = np.abs(R)
 
-        # Epicyclic frequency kappa
-        kappa = self.kappa(R)
-        kappa_squared = kappa**2
+            # Positions in Cartesian coordinates
+            x_pos = R * np.cos(phi)
+            y_pos = R * np.sin(phi)
+            z_pos = np.zeros(N)  # All stars lie in the galactic plane
 
-        # Gamma parameter
-        gamma = 2 * Omega / kappa
+            # Compute circular velocity at R
+            v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
 
-        # Corrected Radial velocity dispersion sigma_R
-        sigma_R_squared = (4/3) * kappa_squared * (alpha**2) * R_c**2
-        sigma_R = np.sqrt(sigma_R_squared)
+            # Angular frequency Omega
+            Omega = self.omega(R)
 
-        # Vertical velocity dispersion sigma_z
-        sigma_z = q * sigma_R  # Simple proportionality
+            # Epicyclic frequency kappa
+            kappa = self.kappa(R)
+            kappa_squared = kappa**2
 
-        # Store initial dispersions for later comparison
-        self.initial_sigma_R = sigma_R.copy()
-        self.initial_sigma_z = sigma_z.copy()
-        self.R_c = R_c.copy()  # Store R_c for each star
+            # Gamma parameter
+            gamma = 2 * Omega / kappa
 
-        # Initialize arrays for velocities
-        v_R = np.zeros(N)
-        v_phi = np.zeros(N)
-        v_z = np.zeros(N)
+            # Corrected Radial velocity dispersion sigma_R
+            sigma_R_squared = (alpha**2) * R_c**2 * kappa_squared
+            sigma_R = np.sqrt(sigma_R_squared)
 
-        iterations = 0
-        unbound = np.ones(N, dtype=bool)  # Initially, all stars are unbound to enter the loop
+            # Compute mass density rho at R_c, z=0
+            rho_midplane = self.rho(R_c, z=0)
 
-        while np.any(unbound) and iterations < max_iterations:
-            logging.info(f"Velocity generation iteration {iterations + 1}")
+            # Corrected Vertical velocity dispersion sigma_z
+            sigma_z_squared = self.b**2 * self.G * rho_midplane
+            sigma_z = np.sqrt(sigma_z_squared)
 
-            # Generate velocities for unbound stars
-            idx_unbound = np.where(unbound)[0]
-            num_unbound = len(idx_unbound)
-
-            if num_unbound == 0:
-                break  # All stars are bound
-
-            v_R_new = np.random.normal(0, sigma_R[idx_unbound])
-            v_z_new = np.random.normal(0, sigma_z[idx_unbound])
-            v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
-
-            # Compute angular momentum L_z for these stars
-            L_z_new = R[idx_unbound] * v_phi_new
-
-            # Compute total mechanical energy per unit mass
-            kinetic_energy_new = 0.5 * (v_R_new**2 + v_z_new**2)        # Radial and vertical kinetic energy
-            rotational_energy_new = 0.5 * (L_z_new**2) / R[idx_unbound]**2      # Rotational kinetic energy
-            potential_energy_new = self.potential(R[idx_unbound], z_pos[idx_unbound])     # Gravitational potential
-            E_total_new = kinetic_energy_new + rotational_energy_new + potential_energy_new  # [N]
-
-            # Compute escape speed squared
-            escape_speed_squared = -2 * potential_energy_new
-
-            # Total speed squared
-            total_speed_squared = v_R_new**2 + v_phi_new**2 + v_z_new**2
-
-            # Identify stars with total energy >= 0 or speed exceeding escape speed
-            unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
-            unbound[idx_unbound] = unbound_new
-
-            # Update velocities for bound stars
-            bound_indices = idx_unbound[~unbound_new]
-            v_R[bound_indices] = v_R_new[~unbound_new]
-            v_z[bound_indices] = v_z_new[~unbound_new]
-            v_phi[bound_indices] = v_phi_new[~unbound_new]
-
-            logging.info(f"  {np.sum(~unbound_new)} stars bound in this iteration.")
-            iterations += 1
-
-        if iterations == max_iterations and np.any(unbound):
-            num_remaining = np.sum(unbound)
-            logging.warning(f"Maximum iterations reached. {num_remaining} stars remain unbound.")
-            # Remove unbound stars
-            idx_bound = np.where(~unbound)[0]
-            R = R[idx_bound]
-            phi = phi[idx_bound]
-            x_pos = x_pos[idx_bound]
-            y_pos = y_pos[idx_bound]
-            z_pos = z_pos[idx_bound]
-            v_R = v_R[idx_bound]
-            v_phi = v_phi[idx_bound]
-            v_z = v_z[idx_bound]
-            sigma_R = sigma_R[idx_bound]
-            sigma_z = sigma_z[idx_bound]
-            R_c = R_c[idx_bound]
+            # Store initial dispersions for later comparison
             self.initial_sigma_R = sigma_R.copy()
             self.initial_sigma_z = sigma_z.copy()
-            self.R_c = R_c.copy()
-            N = len(idx_bound)
-            logging.info(f"Proceeding with {N} bound stars.")
-        else:
-            logging.info(f"All {N} stars initialized as bound orbits.")
+            self.R_c = R_c.copy()  # Store R_c for each star
 
-        # Convert velocities to Cartesian coordinates
-        v_x = v_R * np.cos(phi) - v_phi * np.sin(phi)
-        v_y = v_R * np.sin(phi) + v_phi * np.cos(phi)
+            # Initialize arrays for velocities
+            v_R = np.zeros(N)
+            v_phi = np.zeros(N)
+            v_z = np.zeros(N)
 
-        # Create Particle instances
-        for i in range(N):
-            position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
-            velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
-            particle = Particle(position, velocity)
-            self.particles.append(particle)
+            iterations = 0
+            unbound = np.ones(N, dtype=bool)  # Initially, all stars are unbound to enter the loop
 
-        # Store initial data for later comparison
-        self.initial_R = R.copy()
-        self.initial_phi = phi.copy()
-        self.initial_positions = np.column_stack((x_pos, y_pos, z_pos))
-        self.initial_velocities = np.column_stack((v_x, v_y, v_z))
-        self.initial_v_R = v_R.copy()
-        self.initial_v_z = v_z.copy()
-        self.initial_v_phi = v_phi.copy()
+            while np.any(unbound) and iterations < max_iterations:
+                logging.info(f"Velocity generation iteration {iterations + 1}")
 
-        logging.info(f"Initialization complete with {N} particles.")
+                # Generate velocities for unbound stars
+                idx_unbound = np.where(unbound)[0]
+                num_unbound = len(idx_unbound)
+
+                if num_unbound == 0:
+                    break  # All stars are bound
+
+                v_R_new = np.random.normal(0, sigma_R[idx_unbound])
+                v_z_new = np.random.normal(0, sigma_z[idx_unbound])
+                v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
+
+                # Compute angular momentum L_z for these stars
+                L_z_new = R[idx_unbound] * v_phi_new
+
+                # Compute total mechanical energy per unit mass
+                kinetic_energy_new = 0.5 * (v_R_new**2 + v_z_new**2)        # Radial and vertical kinetic energy
+                rotational_energy_new = 0.5 * (L_z_new**2) / R[idx_unbound]**2      # Rotational kinetic energy
+                potential_energy_new = self.potential(R[idx_unbound], z_pos[idx_unbound])     # Gravitational potential
+                E_total_new = kinetic_energy_new + rotational_energy_new + potential_energy_new  # [N]
+
+                # Compute escape speed squared
+                escape_speed_squared = -2 * potential_energy_new
+
+                # Total speed squared
+                total_speed_squared = v_R_new**2 + v_phi_new**2 + v_z_new**2
+
+                # Identify stars with total energy >= 0 or speed exceeding escape speed
+                unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
+                unbound[idx_unbound] = unbound_new
+
+                # Update velocities for bound stars
+                bound_indices = idx_unbound[~unbound_new]
+                v_R[bound_indices] = v_R_new[~unbound_new]
+                v_z[bound_indices] = v_z_new[~unbound_new]
+                v_phi[bound_indices] = v_phi_new[~unbound_new]
+
+                logging.info(f"  {np.sum(~unbound_new)} stars bound in this iteration.")
+                iterations += 1
+
+            if iterations == max_iterations and np.any(unbound):
+                num_remaining = np.sum(unbound)
+                logging.warning(f"Maximum iterations reached. {num_remaining} stars remain unbound.")
+                # Remove unbound stars
+                idx_bound = np.where(~unbound)[0]
+                R = R[idx_bound]
+                phi = phi[idx_bound]
+                x_pos = x_pos[idx_bound]
+                y_pos = y_pos[idx_bound]
+                z_pos = z_pos[idx_bound]
+                v_R = v_R[idx_bound]
+                v_phi = v_phi[idx_bound]
+                v_z = v_z[idx_bound]
+                sigma_R = sigma_R[idx_bound]
+                sigma_z = sigma_z[idx_bound]
+                R_c = R_c[idx_bound]
+                self.initial_sigma_R = sigma_R.copy()
+                self.initial_sigma_z = sigma_z.copy()
+                self.R_c = R_c.copy()
+                N = len(idx_bound)
+                logging.info(f"Proceeding with {N} bound stars.")
+            else:
+                logging.info(f"All {N} stars initialized as bound orbits.")
+
+            # Convert velocities to Cartesian coordinates
+            v_x = v_R * np.cos(phi) - v_phi * np.sin(phi)
+            v_y = v_R * np.sin(phi) + v_phi * np.cos(phi)
+
+            # Create Particle instances
+            for i in range(N):
+                position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
+                velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
+                particle = Particle(position, velocity)
+                self.particles.append(particle)
+
+            # Store initial data for later comparison
+            self.initial_R = R.copy()
+            self.initial_phi = phi.copy()
+            self.initial_positions = np.column_stack((x_pos, y_pos, z_pos))
+            self.initial_velocities = np.column_stack((v_x, v_y, v_z))
+            self.initial_v_R = v_R.copy()
+            self.initial_v_z = v_z.copy()
+            self.initial_v_phi = v_phi.copy()
+
+            logging.info(f"Initialization complete with {N} particles.")
 
 
 class Particle:
@@ -512,17 +541,17 @@ class Integrator:
             k1_pos = dt * vel  # [N, 3]
 
             # k2
-            acc2 = np.array([galaxy.acceleration(p) for p in pos + 0.5 * k1_pos])  # [N, 3]
+            acc2 = np.array([galaxy.acceleration(p + 0.5 * k1_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
             k2_vel = dt * acc2  # [N, 3]
             k2_pos = dt * (vel + 0.5 * k1_vel)  # [N, 3]
 
             # k3
-            acc3 = np.array([galaxy.acceleration(p) for p in pos + 0.5 * k2_pos])  # [N, 3]
+            acc3 = np.array([galaxy.acceleration(p + 0.5 * k2_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
             k3_vel = dt * acc3  # [N, 3]
             k3_pos = dt * (vel + 0.5 * k2_vel)  # [N, 3]
 
             # k4
-            acc4 = np.array([galaxy.acceleration(p) for p in pos + k3_pos])  # [N, 3]
+            acc4 = np.array([galaxy.acceleration(p + k3_pos[j]) for j, p in enumerate(pos)])  # [N, 3]
             k4_vel = dt * acc4  # [N, 3]
             k4_pos = dt * (vel + k3_vel)  # [N, 3]
 
@@ -567,7 +596,16 @@ class Simulation(System):
         plot_velocity_histograms(): Plot histograms of initial and final velocity distributions.
     """
 
-    def __init__(self, galaxy, dt=0.05, t_max=250.0):
+    def __init__(self, galaxy, dt=0.05, t_max=250.0, integrators=['Leapfrog', 'RK4']):
+        """
+        Initialize the Simulation.
+
+        Parameters:
+            galaxy (Galaxy): The galaxy instance.
+            dt (float): Time step (dimensionless).
+            t_max (float): Total simulation time (dimensionless).
+            integrators (list): List of integrators to run. Options: 'Leapfrog', 'RK4'.
+        """
         super().__init__()
         self.galaxy = galaxy
         self.dt = dt
@@ -575,15 +613,19 @@ class Simulation(System):
         self.steps = int(self.t_max / self.dt)
         self.times = np.linspace(0, self.t_max, self.steps)
         self.integrator = Integrator()
-        self.positions_lf = None
-        self.velocities_lf = None
-        self.energies_lf = None
-        self.angular_momenta_lf = None
-        self.positions_rk4 = None
-        self.velocities_rk4 = None
-        self.energies_rk4 = None
-        self.angular_momenta_rk4 = None
+        self.positions = {}
+        self.velocities = {}
+        self.energies = {}
+        self.angular_momenta = {}
         self.execution_times = {}
+
+        # Validate integrators
+        valid_integrators = ['Leapfrog', 'RK4']
+        for integrator in integrators:
+            if integrator not in valid_integrators:
+                logging.error(f"Invalid integrator selected: {integrator}. Choose from {valid_integrators}.")
+                raise ValueError(f"Invalid integrator selected: {integrator}. Choose from {valid_integrators}.")
+        self.integrators = integrators
 
         # Create the 'result' directory if it does not exist
         self.results_dir = 'result'
@@ -602,33 +644,48 @@ class Simulation(System):
 
     def run(self):
         """
-        Run the simulation using both Leapfrog and RK4 integrators.
+        Run the simulation using the selected integrators.
         """
         logging.info("Starting the simulation.")
 
-        # Leapfrog Integration Timing
-        def run_leapfrog():
-            return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+        for integrator_name in self.integrators:
+            if integrator_name == 'Leapfrog':
+                # Leapfrog Integration Timing
+                def run_leapfrog():
+                    return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
 
-        start_time = timeit.default_timer()
-        self.positions_lf, self.velocities_lf, self.energies_lf, self.angular_momenta_lf = run_leapfrog()
-        total_time_lf = timeit.default_timer() - start_time
-        average_time_lf = total_time_lf / self.steps
-        logging.info(f"Leapfrog integration took {total_time_lf:.3f} seconds in total.")
-        logging.info(f"Average time per step (Leapfrog): {average_time_lf*1e3:.6f} ms.")
-        self.execution_times['Leapfrog'] = average_time_lf * 1e3  # in ms
+                start_time = timeit.default_timer()
+                pos, vel, energy, Lz = run_leapfrog()
+                total_time = timeit.default_timer() - start_time
+                average_time = total_time / self.steps
+                logging.info(f"Leapfrog integration took {total_time:.3f} seconds in total.")
+                logging.info(f"Average time per step (Leapfrog): {average_time*1e3:.6f} ms.")
+                self.execution_times['Leapfrog'] = average_time * 1e3  # in ms
 
-        # RK4 Integration Timing
-        def run_rk4():
-            return self.integrator.rk4(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+                # Store results
+                self.positions['Leapfrog'] = pos
+                self.velocities['Leapfrog'] = vel
+                self.energies['Leapfrog'] = energy
+                self.angular_momenta['Leapfrog'] = Lz
 
-        start_time = timeit.default_timer()
-        self.positions_rk4, self.velocities_rk4, self.energies_rk4, self.angular_momenta_rk4 = run_rk4()
-        total_time_rk4 = timeit.default_timer() - start_time
-        average_time_rk4 = total_time_rk4 / self.steps
-        logging.info(f"RK4 integration took {total_time_rk4:.3f} seconds in total.")
-        logging.info(f"Average time per step (RK4): {average_time_rk4*1e3:.6f} ms.")
-        self.execution_times['RK4'] = average_time_rk4 * 1e3  # in ms
+            elif integrator_name == 'RK4':
+                # RK4 Integration Timing
+                def run_rk4():
+                    return self.integrator.rk4(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+
+                start_time = timeit.default_timer()
+                pos, vel, energy, Lz = run_rk4()
+                total_time = timeit.default_timer() - start_time
+                average_time = total_time / self.steps
+                logging.info(f"RK4 integration took {total_time:.3f} seconds in total.")
+                logging.info(f"Average time per step (RK4): {average_time*1e3:.6f} ms.")
+                self.execution_times['RK4'] = average_time * 1e3  # in ms
+
+                # Store results
+                self.positions['RK4'] = pos
+                self.velocities['RK4'] = vel
+                self.energies['RK4'] = energy
+                self.angular_momenta['RK4'] = Lz
 
         logging.info("Simulation completed.")
 
@@ -645,69 +702,39 @@ class Simulation(System):
         subset = min(subset, N)  # Ensure subset does not exceed total number of stars
         indices = np.random.choice(N, subset, replace=False)  # Randomly select stars to plot
 
-        # Leapfrog Orbits
-        plt.figure(figsize=(12, 6))
+        for integrator_name in self.integrators:
+            pos = self.positions[integrator_name]
+            plt.figure(figsize=(12, 6))
 
-        # x-y plot
-        plt.subplot(1, 2, 1)
-        for i in indices:
-            plt.plot(self.positions_lf[:, i, 0] * self.length_scale,
-                     self.positions_lf[:, i, 1] * self.length_scale,
-                     linewidth=0.5, alpha=0.7)
-        plt.xlabel('x (kpc)', fontsize=12)
-        plt.ylabel('y (kpc)', fontsize=12)
-        plt.title('Leapfrog: Orbit Trajectories in x-y Plane', fontsize=14)
-        plt.grid(True)
-        plt.axis('equal')
+            # x-y plot
+            plt.subplot(1, 2, 1)
+            for i in indices:
+                plt.plot(pos[:, i, 0] * self.length_scale,
+                         pos[:, i, 1] * self.length_scale,
+                         linewidth=0.5, alpha=0.7)
+            plt.xlabel('x (kpc)', fontsize=12)
+            plt.ylabel('y (kpc)', fontsize=12)
+            plt.title(f'{integrator_name}: Orbit Trajectories in x-y Plane', fontsize=14)
+            plt.grid(True)
+            plt.axis('equal')
 
-        # x-z plot
-        plt.subplot(1, 2, 2)
-        for i in indices:
-            plt.plot(self.positions_lf[:, i, 0] * self.length_scale,
-                     self.positions_lf[:, i, 2] * self.length_scale,
-                     linewidth=0.5, alpha=0.7)
-        plt.xlabel('x (kpc)', fontsize=12)
-        plt.ylabel('z (kpc)', fontsize=12)
-        plt.title('Leapfrog: Orbit Trajectories in x-z Plane', fontsize=14)
-        plt.grid(True)
-        plt.axis('equal')
+            # x-z plot
+            plt.subplot(1, 2, 2)
+            for i in indices:
+                plt.plot(pos[:, i, 0] * self.length_scale,
+                         pos[:, i, 2] * self.length_scale,
+                         linewidth=0.5, alpha=0.7)
+            plt.xlabel('x (kpc)', fontsize=12)
+            plt.ylabel('z (kpc)', fontsize=12)
+            plt.title(f'{integrator_name}: Orbit Trajectories in x-z Plane', fontsize=14)
+            plt.grid(True)
+            plt.axis('equal')
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'orbit_leapfrog.png'))
-        plt.close()
-        logging.info(f"Leapfrog orbit trajectories plots saved to '{self.results_dir}/orbit_leapfrog.png'.")
-
-        # RK4 Orbits
-        plt.figure(figsize=(12, 6))
-
-        # x-y plot
-        plt.subplot(1, 2, 1)
-        for i in indices:
-            plt.plot(self.positions_rk4[:, i, 0] * self.length_scale,
-                     self.positions_rk4[:, i, 1] * self.length_scale,
-                     linewidth=0.5, alpha=0.7)
-        plt.xlabel('x (kpc)', fontsize=12)
-        plt.ylabel('y (kpc)', fontsize=12)
-        plt.title('RK4: Orbit Trajectories in x-y Plane', fontsize=14)
-        plt.grid(True)
-        plt.axis('equal')
-
-        # x-z plot
-        plt.subplot(1, 2, 2)
-        for i in indices:
-            plt.plot(self.positions_rk4[:, i, 0] * self.length_scale,
-                     self.positions_rk4[:, i, 2] * self.length_scale,
-                     linewidth=0.5, alpha=0.7)
-        plt.xlabel('x (kpc)', fontsize=12)
-        plt.ylabel('z (kpc)', fontsize=12)
-        plt.title('RK4: Orbit Trajectories in x-z Plane', fontsize=14)
-        plt.grid(True)
-        plt.axis('equal')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'orbit_rk4.png'))
-        plt.close()
-        logging.info(f"RK4 orbit trajectories plots saved to '{self.results_dir}/orbit_rk4.png'.")
+            plt.tight_layout()
+            filename = f'orbit_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close()
+            logging.info(f"{integrator_name} orbit trajectories plots saved to '{self.results_dir}/{filename}'.")
 
     def plot_energy_error(self):
         """
@@ -715,24 +742,20 @@ class Simulation(System):
         """
         logging.info("Generating energy conservation error plot.")
 
-        # Time array in physical units
-        times_physical = self.times * self.time_scale  # Time in Myr
-
-        # Compute total energy for Leapfrog
-        E0_lf = self.energies_lf[0]  # [N]
-        E_error_lf = (self.energies_lf - E0_lf) / np.abs(E0_lf)  # [steps, N]
-
-        # Compute total energy for RK4
-        E0_rk4 = self.energies_rk4[0]  # [N]
-        E_error_rk4 = (self.energies_rk4 - E0_rk4) / np.abs(E0_rk4)  # [steps, N]
-
-        # Compute average energy error across all stars
-        avg_E_error_lf = np.mean(np.abs(E_error_lf), axis=1)  # [steps]
-        avg_E_error_rk4 = np.mean(np.abs(E_error_rk4), axis=1)  # [steps]
-
         plt.figure(figsize=(12, 8))
-        plt.plot(times_physical, avg_E_error_lf, label='Leapfrog', linewidth=1)
-        plt.plot(times_physical, avg_E_error_rk4, label='RK4', linestyle='--', linewidth=1)
+        for integrator_name in self.integrators:
+            # Time array in physical units
+            times_physical = self.times * self.time_scale  # Time in Myr
+
+            # Compute total energy
+            E0 = self.energies[integrator_name][0]  # [N]
+            E_error = (self.energies[integrator_name] - E0) / np.abs(E0)  # [steps, N]
+
+            # Compute average energy error across all stars
+            avg_E_error = np.mean(np.abs(E_error), axis=1)  # [steps]
+
+            plt.plot(times_physical, avg_E_error, label=integrator_name, linewidth=1)
+
         plt.xlabel('Time (Myr)', fontsize=14)
         plt.ylabel('Relative Energy Error', fontsize=14)
         plt.title('Energy Conservation Error Over Time', fontsize=16)
@@ -750,23 +773,20 @@ class Simulation(System):
         """
         logging.info("Generating angular momentum conservation error plot.")
 
-        # Time array in physical units
-        times_physical = self.times * self.time_scale  # Time in Myr
-
-        # Compute angular momentum errors
-        L0_lf = self.angular_momenta_lf[0]  # [N]
-        L_error_lf = (self.angular_momenta_lf - L0_lf) / np.abs(L0_lf)  # [steps, N]
-
-        L0_rk4 = self.angular_momenta_rk4[0]  # [N]
-        L_error_rk4 = (self.angular_momenta_rk4 - L0_rk4) / np.abs(L0_rk4)  # [steps, N]
-
-        # Compute average angular momentum error across all stars
-        avg_L_error_lf = np.mean(np.abs(L_error_lf), axis=1)  # [steps]
-        avg_L_error_rk4 = np.mean(np.abs(L_error_rk4), axis=1)  # [steps]
-
         plt.figure(figsize=(12, 8))
-        plt.plot(times_physical, avg_L_error_lf, label='Leapfrog', linewidth=1)
-        plt.plot(times_physical, avg_L_error_rk4, label='RK4', linestyle='--', linewidth=1)
+        for integrator_name in self.integrators:
+            # Time array in physical units
+            times_physical = self.times * self.time_scale  # Time in Myr
+
+            # Compute angular momentum errors
+            L0 = self.angular_momenta[integrator_name][0]  # [N]
+            L_error = (self.angular_momenta[integrator_name] - L0) / np.abs(L0)  # [steps, N]
+
+            # Compute average angular momentum error across all stars
+            avg_L_error = np.mean(np.abs(L_error), axis=1)  # [steps]
+
+            plt.plot(times_physical, avg_L_error, label=integrator_name, linewidth=1)
+
         plt.xlabel('Time (Myr)', fontsize=14)
         plt.ylabel('Relative Angular Momentum Error', fontsize=14)
         plt.title('Angular Momentum Conservation Error Over Time', fontsize=16)
@@ -796,83 +816,176 @@ class Simulation(System):
         plt.close()
         logging.info(f"Execution time comparison plot saved to '{self.results_dir}/execution_times.png'.")
 
+    def plot_velocity_histograms(self, subset=200):
+        """
+        Plot histograms of initial and final velocity distributions.
+
+        Parameters:
+            subset (int): Number of stars to plot for clarity. Defaults to 200.
+        """
+        logging.info("Generating velocity histograms.")
+
+        N = len(self.galaxy.particles)
+        subset = min(subset, N)  # Ensure subset does not exceed total number of stars
+        indices = np.random.choice(N, subset, replace=False)  # Randomly select stars to plot
+
+        for integrator_name in self.integrators:
+            # Initial velocities
+            initial_vx = self.galaxy.initial_velocities[indices, 0]
+            initial_vy = self.galaxy.initial_velocities[indices, 1]
+            initial_vz = self.galaxy.initial_velocities[indices, 2]
+            initial_speed = np.linalg.norm(self.galaxy.initial_velocities[indices], axis=1)
+
+            # Final velocities from the integrator
+            final_vx = self.velocities[integrator_name][-1][indices, 0]
+            final_vy = self.velocities[integrator_name][-1][indices, 1]
+            final_vz = self.velocities[integrator_name][-1][indices, 2]
+            final_speed = np.linalg.norm(self.velocities[integrator_name][-1][indices], axis=1)
+
+            # Plot histograms for v_R, v_phi, v_z
+            plt.figure(figsize=(18, 6))
+
+            # Radial Velocity
+            plt.subplot(1, 3, 1)
+            plt.hist(initial_vx, bins=30, alpha=0.5, label='Initial $v_x$', color='blue', density=True)
+            plt.hist(final_vx, bins=30, alpha=0.5, label='Final $v_x$', color='green', density=True)
+            plt.xlabel('$v_x$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Radial Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+
+            # Azimuthal Velocity
+            plt.subplot(1, 3, 2)
+            plt.hist(initial_vy, bins=30, alpha=0.5, label='Initial $v_y$', color='blue', density=True)
+            plt.hist(final_vy, bins=30, alpha=0.5, label='Final $v_y$', color='green', density=True)
+            plt.xlabel('$v_y$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Azimuthal Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+
+            # Vertical Velocity
+            plt.subplot(1, 3, 3)
+            plt.hist(initial_vz, bins=30, alpha=0.5, label='Initial $v_z$', color='blue', density=True)
+            plt.hist(final_vz, bins=30, alpha=0.5, label='Final $v_z$', color='green', density=True)
+            plt.xlabel('$v_z$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Vertical Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+
+            plt.tight_layout()
+            filename = f'velocity_histograms_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close()
+            logging.info(f"Velocity histograms for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+
+            # Plot histogram for total speed
+            plt.figure(figsize=(12, 6))
+            plt.hist(initial_speed, bins=30, alpha=0.5, label='Initial Speed', color='blue', density=True)
+            plt.hist(final_speed, bins=30, alpha=0.5, label='Final Speed', color='green', density=True)
+            plt.xlabel('Speed (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Total Speed Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+            plt.tight_layout()
+            filename_speed = f'total_speed_histogram_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename_speed))
+            plt.close()
+            logging.info(f"Total speed histogram for {integrator_name} saved to '{self.results_dir}/{filename_speed}'.")
+
     def compute_velocity_dispersions(self):
         """
         Compute the radial and vertical velocity dispersions after integration and compare them to the initial values.
         """
         logging.info("Computing velocity dispersions after integration.")
 
-        # Select the final positions and velocities from Leapfrog integrator
-        final_positions = self.positions_lf[-1]  # [N, 3]
-        final_velocities = self.velocities_lf[-1]  # [N, 3]
+        for integrator_name in self.integrators:
+            # Select the final positions and velocities from the integrator
+            final_positions = self.positions[integrator_name][-1]  # [N, 3]
+            final_velocities = self.velocities[integrator_name][-1]  # [N, 3]
 
-        # Compute final cylindrical coordinates
-        x = final_positions[:, 0]
-        y = final_positions[:, 1]
-        z = final_positions[:, 2]
-        R = np.sqrt(x**2 + y**2)
-        phi = np.arctan2(y, x)
+            # Compute cylindrical coordinates
+            x = final_positions[:, 0]
+            y = final_positions[:, 1]
+            z = final_positions[:, 2]
+            R = np.sqrt(x**2 + y**2)
+            phi = np.arctan2(y, x)
 
-        # Compute velocities in cylindrical coordinates
-        v_x = final_velocities[:, 0]
-        v_y = final_velocities[:, 1]
-        v_z = final_velocities[:, 2]
+            # Compute velocities in cylindrical coordinates
+            v_x = final_velocities[:, 0]
+            v_y = final_velocities[:, 1]
+            v_z = final_velocities[:, 2]
 
-        # Compute radial and azimuthal velocities
-        with np.errstate(divide='ignore', invalid='ignore'):
-            v_R_final = (x * v_x + y * v_y) / R
-            v_phi_final = (x * v_y - y * v_x) / R
+            # Compute radial and azimuthal velocities
+            with np.errstate(divide='ignore', invalid='ignore'):
+                v_R_final = (x * v_x + y * v_y) / R
+                v_phi_final = (x * v_y - y * v_x) / R
 
-        # Handle division by zero for R=0
-        v_R_final = np.nan_to_num(v_R_final)
-        v_phi_final = np.nan_to_num(v_phi_final)
+            # Handle division by zero for R=0
+            v_R_final = np.nan_to_num(v_R_final)
+            v_phi_final = np.nan_to_num(v_phi_final)
 
-        # Compute velocities relative to local circular velocities
-        v_c_final = np.sqrt(R * (-self.galaxy.dPhidr(R)))  # Circular velocity at final R
-        delta_v_R = v_R_final
-        delta_v_phi = v_phi_final - v_c_final
-        delta_v_z = v_z
+            # Compute velocities relative to local circular velocities
+            v_c_final = np.sqrt(R * (-self.galaxy.dPhidr(R)))  # Circular velocity at final R
+            delta_v_R = v_R_final
+            delta_v_z = v_z
 
-        # Compute velocity dispersions in bins of R_c (initial reference radii)
-        R_c_bins = np.linspace(np.min(self.galaxy.R_c), np.max(self.galaxy.R_c), 10)
-        indices = np.digitize(self.galaxy.R_c, R_c_bins)
+            # Compute velocity dispersions in bins of R_c (initial reference radii)
+            R_c_bins = np.linspace(np.min(self.galaxy.R_c), np.max(self.galaxy.R_c), 10)
+            indices = np.digitize(self.galaxy.R_c, R_c_bins)
 
-        sigma_R_final = np.zeros(len(R_c_bins) - 1)
-        sigma_z_final = np.zeros(len(R_c_bins) - 1)
-        sigma_R_initial = np.zeros(len(R_c_bins) - 1)
-        sigma_z_initial = np.zeros(len(R_c_bins) - 1)
-        R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])
+            sigma_R_final_fit = np.zeros(len(R_c_bins) - 1)
+            sigma_z_final_fit = np.zeros(len(R_c_bins) - 1)
+            sigma_R_initial = np.zeros(len(R_c_bins) - 1)
+            sigma_z_initial = np.zeros(len(R_c_bins) - 1)
+            R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])
 
-        for i in range(1, len(R_c_bins)):
-            idx = np.where(indices == i)[0]
-            if len(idx) > 1:
-                sigma_R_final[i - 1] = np.std(delta_v_R[idx])
-                sigma_z_final[i - 1] = np.std(delta_v_z[idx])
-                sigma_R_initial[i - 1] = np.mean(self.galaxy.initial_sigma_R[idx])
-                sigma_z_initial[i - 1] = np.mean(self.galaxy.initial_sigma_z[idx])
+            for i in range(1, len(R_c_bins)):
+                idx = np.where(indices == i)[0]
+                if len(idx) > 1:
+                    # Residual velocities for this bin
+                    delta_v_R_bin = delta_v_R[idx]
+                    delta_v_z_bin = delta_v_z[idx]
+                    
+                    # Fit Gaussian to the radial residual velocities
+                    params_R = norm.fit(delta_v_R_bin)
+                    sigma_R_final_fit[i - 1] = params_R[1]  # params_R[1] is the standard deviation
+                    
+                    # Fit Gaussian to the vertical residual velocities
+                    params_z = norm.fit(delta_v_z_bin)
+                    sigma_z_final_fit[i - 1] = params_z[1]
+                    
+                    # Initial sigma values (from theoretical expressions)
+                    sigma_R_initial[i - 1] = np.mean(self.galaxy.initial_sigma_R[idx])
+                    sigma_z_initial[i - 1] = np.mean(self.galaxy.initial_sigma_z[idx])
 
-        # Plot the comparison
-        plt.figure(figsize=(12, 6))
-        plt.plot(R_c_centers, sigma_R_initial, 'o-', label='Initial $\sigma_R$', color='blue')
-        plt.plot(R_c_centers, sigma_R_final, 's--', label='Final $\sigma_R$', color='blue')
-        plt.plot(R_c_centers, sigma_z_initial, 'o-', label='Initial $\sigma_z$', color='red')
-        plt.plot(R_c_centers, sigma_z_final, 's--', label='Final $\sigma_z$', color='red')
-        plt.xlabel('Reference Radius $R_c$ (dimensionless)', fontsize=14)
-        plt.ylabel('Velocity Dispersion (dimensionless)', fontsize=14)
-        plt.title('Velocity Dispersions Before and After Integration', fontsize=16)
-        plt.legend(fontsize=12)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'velocity_dispersions.png'))
-        plt.close()
-        logging.info(f"Velocity dispersion comparison plot saved to '{self.results_dir}/velocity_dispersions.png'.")
+            # Plot the comparison
+            plt.figure(figsize=(12, 6))
+            plt.plot(R_c_centers, sigma_R_initial, 'o-', label='Initial $\sigma_R$ (Theoretical)', color='blue')
+            plt.plot(R_c_centers, sigma_R_final_fit, 's--', label='Final $\sigma_R$ (Gaussian Fit)', color='blue')
+            plt.plot(R_c_centers, sigma_z_initial, 'o-', label='Initial $\sigma_z$ (Theoretical)', color='red')
+            plt.plot(R_c_centers, sigma_z_final_fit, 's--', label='Final $\sigma_z$ (Gaussian Fit)', color='red')
+            plt.xlabel('Reference Radius $R_c$ (dimensionless)', fontsize=14)
+            plt.ylabel('Velocity Dispersion $\sigma$ (dimensionless)', fontsize=14)
+            plt.title(f'Velocity Dispersions Before and After Integration ({integrator_name})', fontsize=16)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+            plt.tight_layout()
+            filename = f'velocity_dispersions_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close()
+            logging.info(f"Velocity dispersion comparison plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
-        # Optionally, print the dispersions
-        for i in range(len(R_c_centers)):
-            logging.info(f"R_c = {R_c_centers[i]:.2f}: Initial sigma_R = {sigma_R_initial[i]:.4f}, "
-                         f"Final sigma_R = {sigma_R_final[i]:.4f}, "
-                         f"Initial sigma_z = {sigma_z_initial[i]:.4f}, "
-                         f"Final sigma_z = {sigma_z_final[i]:.4f}")
+            # Optionally, print the dispersions
+            for i in range(len(R_c_centers)):
+                logging.info(f"{integrator_name} - R_c = {R_c_centers[i]:.2f}: Initial sigma_R = {sigma_R_initial[i]:.4f}, "
+                            f"Final sigma_R (Fit) = {sigma_R_final_fit[i]:.4f}, "
+                            f"Initial sigma_z = {sigma_z_initial[i]:.4f}, "
+                            f"Final sigma_z (Fit) = {sigma_z_final_fit[i]:.4f}")
+
 
     def plot_velocity_histograms(self, subset=200):
         """
@@ -887,69 +1000,72 @@ class Simulation(System):
         subset = min(subset, N)  # Ensure subset does not exceed total number of stars
         indices = np.random.choice(N, subset, replace=False)  # Randomly select stars to plot
 
-        # Initial velocities
-        initial_vx = self.galaxy.initial_velocities[indices, 0]
-        initial_vy = self.galaxy.initial_velocities[indices, 1]
-        initial_vz = self.galaxy.initial_velocities[indices, 2]
-        initial_speed = np.linalg.norm(self.galaxy.initial_velocities[indices], axis=1)
+        for integrator_name in self.integrators:
+            # Initial velocities
+            initial_vx = self.galaxy.initial_velocities[indices, 0]
+            initial_vy = self.galaxy.initial_velocities[indices, 1]
+            initial_vz = self.galaxy.initial_velocities[indices, 2]
+            initial_speed = np.linalg.norm(self.galaxy.initial_velocities[indices], axis=1)
 
-        # Final velocities from Leapfrog
-        final_vx = self.velocities_lf[-1][indices, 0]
-        final_vy = self.velocities_lf[-1][indices, 1]
-        final_vz = self.velocities_lf[-1][indices, 2]
-        final_speed = np.linalg.norm(self.velocities_lf[-1][indices], axis=1)
+            # Final velocities from the integrator
+            final_vx = self.velocities[integrator_name][-1][indices, 0]
+            final_vy = self.velocities[integrator_name][-1][indices, 1]
+            final_vz = self.velocities[integrator_name][-1][indices, 2]
+            final_speed = np.linalg.norm(self.velocities[integrator_name][-1][indices], axis=1)
 
-        # Plot histograms for v_R, v_phi, v_z
-        plt.figure(figsize=(18, 6))
+            # Plot histograms for v_R, v_phi, v_z
+            plt.figure(figsize=(18, 6))
 
-        # Radial Velocity
-        plt.subplot(1, 3, 1)
-        plt.hist(initial_vx, bins=30, alpha=0.5, label='Initial $v_x$', color='blue', density=True)
-        plt.hist(final_vx, bins=30, alpha=0.5, label='Final $v_x$', color='green', density=True)
-        plt.xlabel('$v_x$ (dimensionless)', fontsize=12)
-        plt.ylabel('Normalized Frequency', fontsize=12)
-        plt.title('Radial Velocity Distribution', fontsize=14)
-        plt.legend(fontsize=12)
-        plt.grid(True)
+            # Radial Velocity
+            plt.subplot(1, 3, 1)
+            plt.hist(initial_vx, bins=30, alpha=0.5, label='Initial $v_x$', color='blue', density=True)
+            plt.hist(final_vx, bins=30, alpha=0.5, label='Final $v_x$', color='green', density=True)
+            plt.xlabel('$v_x$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Radial Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
 
-        # Azimuthal Velocity
-        plt.subplot(1, 3, 2)
-        plt.hist(initial_vy, bins=30, alpha=0.5, label='Initial $v_y$', color='blue', density=True)
-        plt.hist(final_vy, bins=30, alpha=0.5, label='Final $v_y$', color='green', density=True)
-        plt.xlabel('$v_y$ (dimensionless)', fontsize=12)
-        plt.ylabel('Normalized Frequency', fontsize=12)
-        plt.title('Azimuthal Velocity Distribution', fontsize=14)
-        plt.legend(fontsize=12)
-        plt.grid(True)
+            # Azimuthal Velocity
+            plt.subplot(1, 3, 2)
+            plt.hist(initial_vy, bins=30, alpha=0.5, label='Initial $v_y$', color='blue', density=True)
+            plt.hist(final_vy, bins=30, alpha=0.5, label='Final $v_y$', color='green', density=True)
+            plt.xlabel('$v_y$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Azimuthal Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
 
-        # Vertical Velocity
-        plt.subplot(1, 3, 3)
-        plt.hist(initial_vz, bins=30, alpha=0.5, label='Initial $v_z$', color='blue', density=True)
-        plt.hist(final_vz, bins=30, alpha=0.5, label='Final $v_z$', color='green', density=True)
-        plt.xlabel('$v_z$ (dimensionless)', fontsize=12)
-        plt.ylabel('Normalized Frequency', fontsize=12)
-        plt.title('Vertical Velocity Distribution', fontsize=14)
-        plt.legend(fontsize=12)
-        plt.grid(True)
+            # Vertical Velocity
+            plt.subplot(1, 3, 3)
+            plt.hist(initial_vz, bins=30, alpha=0.5, label='Initial $v_z$', color='blue', density=True)
+            plt.hist(final_vz, bins=30, alpha=0.5, label='Final $v_z$', color='green', density=True)
+            plt.xlabel('$v_z$ (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Vertical Velocity Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'velocity_histograms.png'))
-        plt.close()
-        logging.info(f"Velocity histograms saved to '{self.results_dir}/velocity_histograms.png'.")
+            plt.tight_layout()
+            filename = f'velocity_histograms_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close()
+            logging.info(f"Velocity histograms for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
-        # Plot histogram for total speed
-        plt.figure(figsize=(12, 6))
-        plt.hist(initial_speed, bins=30, alpha=0.5, label='Initial Speed', color='blue', density=True)
-        plt.hist(final_speed, bins=30, alpha=0.5, label='Final Speed', color='green', density=True)
-        plt.xlabel('Speed (dimensionless)', fontsize=12)
-        plt.ylabel('Normalized Frequency', fontsize=12)
-        plt.title('Total Speed Distribution', fontsize=14)
-        plt.legend(fontsize=12)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'total_speed_histogram.png'))
-        plt.close()
-        logging.info(f"Total speed histogram saved to '{self.results_dir}/total_speed_histogram.png'.")
+            # Plot histogram for total speed
+            plt.figure(figsize=(12, 6))
+            plt.hist(initial_speed, bins=30, alpha=0.5, label='Initial Speed', color='blue', density=True)
+            plt.hist(final_speed, bins=30, alpha=0.5, label='Final Speed', color='green', density=True)
+            plt.xlabel('Speed (dimensionless)', fontsize=12)
+            plt.ylabel('Normalized Frequency', fontsize=12)
+            plt.title(f'Total Speed Distribution ({integrator_name})', fontsize=14)
+            plt.legend(fontsize=12)
+            plt.grid(True)
+            plt.tight_layout()
+            filename_speed = f'total_speed_histogram_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename_speed))
+            plt.close()
+            logging.info(f"Total speed histogram for {integrator_name} saved to '{self.results_dir}/{filename_speed}'.")
 
 
 def main():
@@ -970,20 +1086,23 @@ def main():
     galaxy = Galaxy(mass=1.0, a=2.0, b=0.1)
 
     # Initialize stars with the Schwarzschild velocity distribution
-    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, q=0.6, max_iterations=100)
+    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 1.5  # Simulate for 1.5 orbital periods at Rmax
+    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy
 
-    # Create Simulation instance
-    simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max)
+    # Select integrators to run: 'Leapfrog', 'RK4', or both
+    selected_integrators = ['Leapfrog']  # Modify this list to select integrators
+
+    # Create Simulation instance with selected integrators
+    simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)
 
     # Run the simulation
     simulation.run()
@@ -1003,6 +1122,15 @@ def main():
 
     # Plot velocity histograms
     simulation.plot_velocity_histograms(subset=200)
+
+    # Save positions and velocities for each integrator
+    for integrator_name in selected_integrators:
+        np.save(os.path.join(simulation.results_dir, f'positions_{integrator_name.lower()}.npy'),
+                simulation.positions[integrator_name])
+        np.save(os.path.join(simulation.results_dir, f'velocities_{integrator_name.lower()}.npy'),
+                simulation.velocities[integrator_name])
+
+    logging.info("All simulation data and plots have been saved.")
 
 
 if __name__ == '__main__':
