@@ -898,93 +898,219 @@ class Simulation(System):
 
     def compute_velocity_dispersions(self):
         """
-        Compute the radial and vertical velocity dispersions after integration and compare them to the initial values.
+        Compute the radial and vertical velocity dispersions at specific moments
+        (start, 1/3, 2/3, final) after integration and compare them to the initial values.
+        Includes error bars representing uncertainties in the fitted dispersions.
         """
-        logging.info("Computing velocity dispersions after integration.")
+        logging.info("Computing velocity dispersions at specific moments after integration.")
+
+        # Define the time steps: start, 1/3, 2/3, and final
+        moments = {
+            'Start': 0,
+            '1/3': self.steps // 3,
+            '2/3': 2 * self.steps // 3,
+            'Final': self.steps - 1
+        }
+
+        # Define the order of moments for consistent coloring
+        moment_order = list(moments.keys())  # ['Start', '1/3', '2/3', 'Final']
+        n_moments = len(moment_order)
+
+        # Choose a blue-to-red colormap
+        cmap = plt.get_cmap('coolwarm')  # 'coolwarm' transitions from blue to red
+
+        # Generate colors for each moment based on their order
+        colors = [cmap(i / (n_moments - 1)) for i in range(n_moments)]
+
+        # Define markers for sigma_R and sigma_z
+        markers_R = ['o', '^', 's', 'D']  # Circle, Triangle Up, Square, Diamond
+        markers_z = ['s', 'v', 'D', 'x']  # Square, Triangle Down, Diamond, Cross
+
+        # Create a dictionary to hold styles for each moment
+        moment_styles = {
+            moment: {
+                'color': color,
+                'marker_R': markers_R[i],
+                'marker_z': markers_z[i],
+                'linestyle_R': '-',    # Solid line for sigma_R
+                'linestyle_z': '--'    # Dashed line for sigma_z
+            }
+            for i, (moment, color) in enumerate(zip(moment_order, colors))
+        }
+
+        # Compute initial sigma_R_init and sigma_z_init once
+        R_c_bins = np.linspace(np.min(self.galaxy.R_c), np.max(self.galaxy.R_c), 10)
+        indices = np.digitize(self.galaxy.R_c, R_c_bins)
+        R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])
+
+        sigma_R_init = []
+        sigma_z_init = []
+        for i in range(1, len(R_c_bins)):
+            idx = np.where(indices == i)[0]
+            if len(idx) > 1:
+                # Initial sigma values (from theoretical expressions)
+                sigma_R_initial_val = np.mean(self.galaxy.initial_sigma_R[idx])
+                sigma_z_initial_val = np.mean(self.galaxy.initial_sigma_z[idx])
+                sigma_R_init.append(sigma_R_initial_val)
+                sigma_z_init.append(sigma_z_initial_val)
+            else:
+                # Not enough stars to compute dispersion
+                sigma_R_init.append(np.nan)
+                sigma_z_init.append(np.nan)
 
         for integrator_name in self.integrators:
-            # Select the final positions and velocities from the integrator
-            final_positions = self.positions[integrator_name][-1]  # [N, 3]
-            final_velocities = self.velocities[integrator_name][-1]  # [N, 3]
+            logging.info(f"Processing dispersions for integrator: {integrator_name}")
 
-            # Compute cylindrical coordinates
-            x = final_positions[:, 0]
-            y = final_positions[:, 1]
-            z = final_positions[:, 2]
-            R = np.sqrt(x**2 + y**2)
-            phi = np.arctan2(y, x)
+            # Initialize dictionaries to store dispersions and uncertainties
+            dispersions_R = {moment: [] for moment in moments}
+            dispersions_z = {moment: [] for moment in moments}
+            uncertainties_R = {moment: [] for moment in moments}
+            uncertainties_z = {moment: [] for moment in moments}
 
-            # Compute velocities in cylindrical coordinates
-            v_x = final_velocities[:, 0]
-            v_y = final_velocities[:, 1]
-            v_z = final_velocities[:, 2]
+            for moment_label, step_idx in moments.items():
+                logging.info(f"  Computing dispersions at moment: {moment_label} (Step {step_idx})")
 
-            # Compute radial and azimuthal velocities
-            with np.errstate(divide='ignore', invalid='ignore'):
-                v_R_final = (x * v_x + y * v_y) / R
-                v_phi_final = (x * v_y - y * v_x) / R
+                # Extract positions and velocities at the specified step
+                pos = self.positions[integrator_name][step_idx]  # [N, 3]
+                vel = self.velocities[integrator_name][step_idx]  # [N, 3]
 
-            # Handle division by zero for R=0
-            v_R_final = np.nan_to_num(v_R_final)
-            v_phi_final = np.nan_to_num(v_phi_final)
+                # Compute cylindrical coordinates
+                x = pos[:, 0]
+                y = pos[:, 1]
+                z = pos[:, 2]
+                R = np.sqrt(x**2 + y**2)
+                phi = np.arctan2(y, x)
 
-            # Compute velocities relative to local circular velocities
-            v_c_final = np.sqrt(R * (-self.galaxy.dPhidr(R)))  # Circular velocity at final R
-            delta_v_R = v_R_final
-            delta_v_z = v_z
+                # Compute velocities in cylindrical coordinates
+                v_x = vel[:, 0]
+                v_y = vel[:, 1]
+                v_z = vel[:, 2]
 
-            # Compute velocity dispersions in bins of R_c (initial reference radii)
-            R_c_bins = np.linspace(np.min(self.galaxy.R_c), np.max(self.galaxy.R_c), 10)
-            indices = np.digitize(self.galaxy.R_c, R_c_bins)
+                # Compute radial and azimuthal velocities
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    v_R_final = (x * v_x + y * v_y) / R
+                    v_phi_final = (x * v_y - y * v_x) / R
 
-            sigma_R_final_fit = np.zeros(len(R_c_bins) - 1)
-            sigma_z_final_fit = np.zeros(len(R_c_bins) - 1)
-            sigma_R_initial = np.zeros(len(R_c_bins) - 1)
-            sigma_z_initial = np.zeros(len(R_c_bins) - 1)
-            R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])
+                # Handle division by zero for R=0
+                v_R_final = np.nan_to_num(v_R_final)
+                v_phi_final = np.nan_to_num(v_phi_final)
 
-            for i in range(1, len(R_c_bins)):
-                idx = np.where(indices == i)[0]
-                if len(idx) > 1:
-                    # Residual velocities for this bin
-                    delta_v_R_bin = delta_v_R[idx]
-                    delta_v_z_bin = delta_v_z[idx]
-                    
-                    # Fit Gaussian to the radial residual velocities
-                    params_R = norm.fit(delta_v_R_bin)
-                    sigma_R_final_fit[i - 1] = params_R[1]  # params_R[1] is the standard deviation
-                    
-                    # Fit Gaussian to the vertical residual velocities
-                    params_z = norm.fit(delta_v_z_bin)
-                    sigma_z_final_fit[i - 1] = params_z[1]
-                    
-                    # Initial sigma values (from theoretical expressions)
-                    sigma_R_initial[i - 1] = np.mean(self.galaxy.initial_sigma_R[idx])
-                    sigma_z_initial[i - 1] = np.mean(self.galaxy.initial_sigma_z[idx])
+                # Compute residual velocities
+                delta_v_R = v_R_final
+                delta_v_z = v_z
 
-            # Plot the comparison
-            plt.figure(figsize=(12, 6))
-            plt.plot(R_c_centers, sigma_R_initial, 'o-', label='Initial $\sigma_R$ (Theoretical)', color='blue')
-            plt.plot(R_c_centers, sigma_R_final_fit, 's--', label='Final $\sigma_R$ (Gaussian Fit)', color='blue')
-            plt.plot(R_c_centers, sigma_z_initial, 'o-', label='Initial $\sigma_z$ (Theoretical)', color='red')
-            plt.plot(R_c_centers, sigma_z_final_fit, 's--', label='Final $\sigma_z$ (Gaussian Fit)', color='red')
-            plt.xlabel('Reference Radius $R_c$ (dimensionless)', fontsize=14)
-            plt.ylabel('Velocity Dispersion $\sigma$ (dimensionless)', fontsize=14)
-            plt.title(f'Velocity Dispersions Before and After Integration ({integrator_name})', fontsize=16)
-            plt.legend(fontsize=12)
-            plt.grid(True)
-            plt.tight_layout()
-            filename = f'velocity_dispersions_{integrator_name.lower()}.png'
+                # Initialize lists for this moment
+                sigma_R_fit = []
+                sigma_z_fit = []
+                sigma_R_unc_fit = []
+                sigma_z_unc_fit = []
+
+                for i in range(1, len(R_c_bins)):
+                    idx = np.where(indices == i)[0]
+                    if len(idx) > 1:
+                        # Residual velocities for this bin
+                        delta_v_R_bin = delta_v_R[idx]
+                        delta_v_z_bin = delta_v_z[idx]
+
+                        # Fit Gaussian to the radial residual velocities
+                        params_R = norm.fit(delta_v_R_bin)
+                        sigma_R = params_R[1]  # Standard deviation
+                        sigma_R_fit.append(sigma_R)
+
+                        # Fit Gaussian to the vertical residual velocities
+                        params_z = norm.fit(delta_v_z_bin)
+                        sigma_z = params_z[1]
+                        sigma_z_fit.append(sigma_z)
+
+                        # Compute uncertainties in the fitted dispersions
+                        N_bin = len(idx)
+                        sigma_R_unc = sigma_R / np.sqrt(2 * (N_bin - 1))
+                        sigma_z_unc = sigma_z / np.sqrt(2 * (N_bin - 1))
+                        sigma_R_unc_fit.append(sigma_R_unc)
+                        sigma_z_unc_fit.append(sigma_z_unc)
+                    else:
+                        # Not enough stars to compute dispersion
+                        sigma_R_fit.append(np.nan)
+                        sigma_z_fit.append(np.nan)
+                        sigma_R_unc_fit.append(np.nan)
+                        sigma_z_unc_fit.append(np.nan)
+
+                # Store the dispersions and uncertainties
+                dispersions_R[moment_label] = sigma_R_fit
+                dispersions_z[moment_label] = sigma_z_fit
+                uncertainties_R[moment_label] = sigma_R_unc_fit
+                uncertainties_z[moment_label] = sigma_z_unc_fit
+
+            # Plot the dispersions with error bars and lines connecting points
+            plt.figure(figsize=(14, 8))
+            for moment_label in moments:
+                if not np.all(np.isnan(dispersions_R[moment_label])):
+                    # Plot sigma_R
+                    plt.errorbar(
+                        R_c_centers,
+                        dispersions_R[moment_label],
+                        yerr=uncertainties_R[moment_label],
+                        marker=moment_styles[moment_label]['marker_R'],
+                        linestyle=moment_styles[moment_label]['linestyle_R'],
+                        label=f"{moment_label} σ_R",
+                        color=moment_styles[moment_label]['color'],
+                        capsize=3,
+                        markersize=6,
+                        linewidth=1.5
+                    )
+                    # Plot sigma_z
+                    plt.errorbar(
+                        R_c_centers,
+                        dispersions_z[moment_label],
+                        yerr=uncertainties_z[moment_label],
+                        marker=moment_styles[moment_label]['marker_z'],
+                        linestyle=moment_styles[moment_label]['linestyle_z'],
+                        label=f"{moment_label} σ_z",
+                        color=moment_styles[moment_label]['color'],
+                        capsize=3,
+                        markersize=6,
+                        linewidth=1.5
+                    )
+
+            # Plot initial theoretical dispersions as solid lines
+            plt.plot(R_c_centers, sigma_R_init, 'k-', label='Initial σ_R (Theoretical)', linewidth=2)
+            plt.plot(R_c_centers, sigma_z_init, 'k--', label='Initial σ_z (Theoretical)', linewidth=2)
+
+            plt.xlabel('Reference Radius $R_c$ (dimensionless)', fontsize=16)
+            plt.ylabel('Velocity Dispersion σ (dimensionless)', fontsize=16)
+            plt.title(f'Velocity Dispersions at Different Moments ({integrator_name})', fontsize=18)
+
+            # Place the legend outside the plot to avoid overlapping with data
+            plt.legend(fontsize=12, bbox_to_anchor=(1, 1), loc='upper left')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout(rect=[0, 0, 1, 1])  # Adjust the rect to make space for the legend
+
+            filename = f'velocity_dispersions_{integrator_name.lower()}_moments.png'
             plt.savefig(os.path.join(self.results_dir, filename))
             plt.close()
-            logging.info(f"Velocity dispersion comparison plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+            logging.info(f"Velocity dispersion comparison plot with moments for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
             # Optionally, print the dispersions
             for i in range(len(R_c_centers)):
-                logging.info(f"{integrator_name} - R_c = {R_c_centers[i]:.2f}: Initial sigma_R = {sigma_R_initial[i]:.4f}, "
-                            f"Final sigma_R (Fit) = {sigma_R_final_fit[i]:.4f}, "
-                            f"Initial sigma_z = {sigma_z_initial[i]:.4f}, "
-                            f"Final sigma_z (Fit) = {sigma_z_final_fit[i]:.4f}")
+                sigma_R_init_val = sigma_R_init[i]
+                sigma_z_init_val = sigma_z_init[i]
+                for moment_label in moments:
+                    # Ensure the lists have the correct length
+                    if i < len(dispersions_R[moment_label]):
+                        sigma_R = dispersions_R[moment_label][i]
+                        sigma_z = dispersions_z[moment_label][i]
+                        sigma_R_unc = uncertainties_R[moment_label][i]
+                        sigma_z_unc = uncertainties_z[moment_label][i]
+                    else:
+                        sigma_R = np.nan
+                        sigma_z = np.nan
+                        sigma_R_unc = np.nan
+                        sigma_z_unc = np.nan
+                    logging.info(f"{integrator_name} - Moment: {moment_label}, R_c = {R_c_centers[i]:.2f}: "
+                                f"σ_R = {sigma_R:.4f} ± {sigma_R_unc:.4f}, "
+                                f"σ_z = {sigma_z:.4f} ± {sigma_z_unc:.4f}, "
+                                f"Initial σ_R = {sigma_R_init_val:.4f}, Initial σ_z = {sigma_z_init_val:.4f}")
+
 
 
     def plot_velocity_histograms(self, subset=200):
@@ -1074,7 +1200,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 1000  # Increased number for better statistics
+    N_stars = 100000  # Increased number for better statistics
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
