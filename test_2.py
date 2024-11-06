@@ -105,6 +105,7 @@ class Galaxy(System):
         potential(R, z): Compute the gravitational potential at (R, z).
         acceleration(pos): Compute the acceleration at position pos.
         initialize_stars(N, Rmax): Initialize N stars with positions drawn from the Schwarzschild distribution.
+        set_perturber(perturber): Set the perturber for the galaxy.
     """
 
     def __init__(self, mass=1.0, a=2.0, b=None):
@@ -141,14 +142,27 @@ class Galaxy(System):
         """
         denom = np.sqrt(R**2 + (self.a + np.sqrt(z**2 + self.b**2))**2)
         return -self.G * self.M / denom
-
-    def acceleration(self, pos):
+    
+    def set_perturber(self, perturber):
         """
-        Compute the acceleration vectors at given positions.
+        Set the perturber for the galaxy.
+
+        Parameters:
+            perturber (Perturber): The perturber object.
+        """
+        self.perturber = perturber
+        logging.info("Perturber has been set in the galaxy.")
+
+
+    def acceleration(self, pos, perturber_pos=None):
+        """
+        Compute the acceleration vectors at given positions, including the effect of the perturber if present.
 
         Parameters:
             pos : np.ndarray
                 Array of positions [N, 3].
+            perturber_pos : np.ndarray
+                Position of the perturber [3], default is None.
 
         Returns:
             np.ndarray
@@ -163,7 +177,43 @@ class Galaxy(System):
         ax = -self.G * self.M * x / denom
         ay = -self.G * self.M * y / denom
         az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
-        return np.stack((ax, ay, az), axis=-1)
+        acc = np.stack((ax, ay, az), axis=-1)
+
+        # Add acceleration due to perturber
+        if perturber_pos is not None:
+            delta_r = perturber_pos - pos  # [N, 3]
+            r = np.linalg.norm(delta_r, axis=1)  # [N]
+            with np.errstate(divide='ignore', invalid='ignore'):
+                acc_pert = self.G * self.perturber.mass * delta_r / r[:, None]**3
+                acc_pert = np.nan_to_num(acc_pert)
+            acc += acc_pert
+
+        return acc
+
+    def acceleration_single(self, pos):
+        """
+        Compute the acceleration at a single position due to the galaxy's potential.
+
+        Parameters:
+            pos : np.ndarray
+                Position array [3].
+
+        Returns:
+            np.ndarray
+                Acceleration vector [3].
+        """
+        x = pos[0]
+        y = pos[1]
+        z = pos[2]
+        R = np.sqrt(x**2 + y**2)
+        z_term = np.sqrt(z**2 + self.b**2)
+        denom = (R**2 + (self.a + z_term)**2)**1.5
+        ax = -self.G * self.M * x / denom
+        ay = -self.G * self.M * y / denom
+        az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
+        acc = np.array([ax, ay, az])
+
+        return acc
 
     def dPhidr(self, R, z=0):
         """
@@ -421,7 +471,6 @@ class Particle:
         self.velocity = np.copy(velocity)
         self.energy = None
         self.angular_momentum = None
-        logging.debug(f"Particle initialized with position {self.position} and velocity {self.velocity}.")
 
     def reset(self):
         """
@@ -431,7 +480,33 @@ class Particle:
         self.velocity = np.copy(self.initial_velocity)
         self.energy = None
         self.angular_momentum = None
-        logging.info("Particle reset to initial conditions.")
+
+class Perturber:
+    """
+    Perturber class representing a massive object (e.g., a black hole) that moves in the galaxy.
+
+    Attributes:
+        mass (float): Mass of the perturber (normalized).
+        position (np.ndarray): Position vector [x, y, z].
+        velocity (np.ndarray): Velocity vector [vx, vy, vz].
+    """
+
+    def __init__(self, mass, position, velocity):
+        self.mass = mass
+        self.initial_position = np.copy(position)
+        self.initial_velocity = np.copy(velocity)
+        self.position = np.copy(position)
+        self.velocity = np.copy(velocity)
+        logging.info(f"Perturber initialized with mass {self.mass}, position {self.position}, and velocity {self.velocity}.")
+
+    def reset(self):
+        """
+        Reset the perturber to its initial conditions.
+        """
+        self.position = np.copy(self.initial_position)
+        self.velocity = np.copy(self.initial_velocity)
+        logging.info("Perturber reset to initial conditions.")
+
 
 
 class Integrator:
@@ -441,9 +516,29 @@ class Integrator:
 
     def leapfrog(self, particles, galaxy, dt, steps):
         """
-        Leapfrog integrator for orbit simulation.
+        Leapfrog integrator for orbit simulation, including the perturber.
+
+        This implementation follows the Kick-Drift-Kick scheme:
+        1. Kick: Update velocities by half-step using current accelerations.
+        2. Drift: Update positions by full-step using updated velocities.
+        3. Kick: Update velocities by another half-step using new accelerations.
+
+        Parameters:
+            particles (list of Particle): List of particles to integrate.
+            galaxy (Galaxy): The galaxy instance containing the potential and perturber.
+            dt (float): Time step.
+            steps (int): Number of integration steps.
+
+        Returns:
+            positions (np.ndarray): Positions of particles at each step [steps, N, 3].
+            velocities (np.ndarray): Velocities of particles at each step [steps, N, 3].
+            energies (np.ndarray): Total energies of particles at each step [steps, N].
+            angular_momenta (np.ndarray): Angular momenta (Lz) of particles at each step [steps, N].
+            positions_BH (np.ndarray or None): Positions of the perturber at each step [steps, 3] or None.
+            velocities_BH (np.ndarray or None): Velocities of the perturber at each step [steps, 3] or None.
         """
         logging.info("Starting Leapfrog integration.")
+
         N = len(particles)
         positions = np.zeros((steps, N, 3))
         velocities = np.zeros((steps, N, 3))
@@ -454,47 +549,103 @@ class Integrator:
         pos = np.array([particle.position for particle in particles])  # [N, 3]
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
 
-        # Calculate initial half-step velocities
-        acc = galaxy.acceleration(pos)  # [N, 3]
+        # If there is a perturber, initialize its position and velocity
+        if hasattr(galaxy, 'perturber'):
+            perturber = galaxy.perturber
+            pos_BH = np.copy(perturber.position)  # [3]
+            vel_BH = np.copy(perturber.velocity)  # [3]
+
+            # Store the perturber's trajectory
+            positions_BH = np.zeros((steps, 3))
+            velocities_BH = np.zeros((steps, 3))
+
+            # Calculate initial acceleration for the perturber
+            acc_BH = galaxy.acceleration_single(pos_BH)
+
+            # Initialize half-step velocity for the perturber
+            vel_BH_half = vel_BH + 0.5 * dt * acc_BH
+        else:
+            positions_BH = None
+            velocities_BH = None
+
+        # Calculate initial accelerations for stars using the perturber's position
+        if hasattr(galaxy, 'perturber'):
+            acc = galaxy.acceleration(pos, perturber_pos=pos_BH)  # [N, 3]
+        else:
+            acc = galaxy.acceleration(pos)  # [N, 3]
+
+        # Update velocities by half-step
         vel_half = vel + 0.5 * dt * acc  # [N, 3]
 
         for i in range(steps):
-            # Update positions
+            # --- Drift: Update positions by full-step using half-step velocities ---
             pos += dt * vel_half  # [N, 3]
             positions[i] = pos
 
-            # Calculate acceleration at new positions
-            acc = galaxy.acceleration(pos)  # [N, 3]
+            # Update perturber's position if present
+            if positions_BH is not None:
+                pos_BH += dt * vel_BH_half  # [3]
+                positions_BH[i] = pos_BH
 
-            # Update half-step velocities
-            vel_half += dt * acc  # [N, 3]
+                # Update galaxy's perturber position
+                galaxy.perturber.position = pos_BH
 
-            # Store full-step velocities
-            vel_full = vel_half - 0.5 * dt * acc  # [N, 3]
+            # --- Compute new accelerations based on updated positions ---
+            if hasattr(galaxy, 'perturber'):
+                # Compute accelerations using the updated perturber position
+                acc_new = galaxy.acceleration(pos, perturber_pos=pos_BH)  # [N, 3]
+                acc_BH_new = galaxy.acceleration_single(pos_BH)  # [3]
+            else:
+                acc_new = galaxy.acceleration(pos)  # [N, 3]
+
+            # --- Kick: Update velocities by full-step using new accelerations ---
+            vel_half += dt * acc_new  # [N, 3]
+            vel_full = vel_half - 0.5 * dt * acc_new  # [N, 3] (Full-step velocities)
             velocities[i] = vel_full
 
-            # Compute kinetic and potential energy
+            # Update perturber's velocity if present
+            if positions_BH is not None:
+                vel_BH_half += dt * acc_BH_new  # [3]
+                vel_BH_full = vel_BH_half - 0.5 * dt * acc_BH_new  # [3]
+                velocities_BH[i] = vel_BH_full
+                galaxy.perturber.velocity = vel_BH_full
+
+            # --- Compute kinetic and potential energy ---
             v = np.linalg.norm(vel_full, axis=1)  # [N]
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
             potential_energy = galaxy.potential(R, z)     # [N]
+
+            # Add potential energy due to the perturber
+            if hasattr(galaxy, 'perturber'):
+                delta_r = pos_BH - pos  # [N, 3]
+                r = np.linalg.norm(delta_r, axis=1)  # [N]
+                # Handle cases where r is zero to avoid division by zero
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    potential_energy_pert = - galaxy.G * galaxy.perturber.mass / r  # [N]
+                    potential_energy_pert = np.nan_to_num(potential_energy_pert)  # Replace NaNs with zero
+                potential_energy += potential_energy_pert
+
             kinetic_energy = 0.5 * v**2  # [N]
             energies[i] = kinetic_energy + potential_energy  # [N]
 
-            # Compute angular momentum (Lz component)
+            # --- Compute angular momentum (Lz component) ---
             Lz = pos[:, 0] * vel_full[:, 1] - pos[:, 1] * vel_full[:, 0]  # [N]
             angular_momenta[i] = Lz
 
-            # Log progress every 10%
+            # --- Log progress every 10% ---
             if (i+1) % max(1, (steps // 10)) == 0:
                 logging.info(f"Leapfrog integration progress: {100 * (i+1) / steps:.1f}%")
 
         logging.info("Leapfrog integration completed.")
-        return positions, velocities, energies, angular_momenta
+
+        # Return positions and velocities of stars and perturber
+        return positions, velocities, energies, angular_momenta, positions_BH, velocities_BH
+
 
     def rk4(self, particles, galaxy, dt, steps):
         """
-        Runge-Kutta 4th order integrator for orbit simulation.
+        Runge-Kutta 4th order integrator for orbit simulation, including the perturber.
         """
         logging.info("Starting RK4 integration.")
         N = len(particles)
@@ -502,58 +653,130 @@ class Integrator:
         velocities = np.zeros((steps, N, 3))
         energies = np.zeros((steps, N))
         angular_momenta = np.zeros((steps, N))
+        positions_BH = None
+        velocities_BH = None
 
-        # Initialize positions and velocities
+        # Initialize positions and velocities for stars
         pos = np.array([particle.position for particle in particles])  # [N, 3]
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
 
+        # If there is a perturber, initialize its position and velocity
+        if hasattr(galaxy, 'perturber'):
+            perturber = galaxy.perturber
+            pos_BH = np.copy(perturber.position)  # [3]
+            vel_BH = np.copy(perturber.velocity)  # [3]
+
+            # Store the perturber's trajectory
+            positions_BH = np.zeros((steps, 3))
+            velocities_BH = np.zeros((steps, 3))
+
         for i in range(steps):
-            # k1
-            acc1 = galaxy.acceleration(pos)  # [N, 3]
+
+            # --- RK4 for Stars and Perturber ---
+
+            # k1 for perturber
+            acc1_BH = galaxy.acceleration_single(pos_BH)  # [3]
+            k1_vel_BH = dt * acc1_BH  # [3]
+            k1_pos_BH = dt * vel_BH  # [3]
+
+            # k1 for stars
+            acc1 = galaxy.acceleration(pos, perturber_pos=pos_BH)  # [N, 3]
             k1_vel = dt * acc1  # [N, 3]
             k1_pos = dt * vel  # [N, 3]
 
-            # k2
-            acc2 = galaxy.acceleration(pos + 0.5 * k1_pos)  # [N, 3]
+            # k2 for perturber
+            pos_BH_k2 = pos_BH + 0.5 * k1_pos_BH
+            vel_BH_k2 = vel_BH + 0.5 * k1_vel_BH
+            acc2_BH = galaxy.acceleration_single(pos_BH_k2)  # [3]
+            k2_vel_BH = dt * acc2_BH  # [3]
+            k2_pos_BH = dt * vel_BH_k2  # [3]
+
+            # k2 for stars
+            pos_k2 = pos + 0.5 * k1_pos
+            vel_k2 = vel + 0.5 * k1_vel
+            acc2 = galaxy.acceleration(pos_k2, perturber_pos=pos_BH_k2)  # [N, 3]
             k2_vel = dt * acc2  # [N, 3]
-            k2_pos = dt * (vel + 0.5 * k1_vel)  # [N, 3]
+            k2_pos = dt * vel_k2  # [N, 3]
 
-            # k3
-            acc3 = galaxy.acceleration(pos + 0.5 * k2_pos)  # [N, 3]
+            # k3 for perturber
+            pos_BH_k3 = pos_BH + 0.5 * k2_pos_BH
+            vel_BH_k3 = vel_BH + 0.5 * k2_vel_BH
+            acc3_BH = galaxy.acceleration_single(pos_BH_k3)  # [3]
+            k3_vel_BH = dt * acc3_BH  # [3]
+            k3_pos_BH = dt * vel_BH_k3  # [3]
+
+            # k3 for stars
+            pos_k3 = pos + 0.5 * k2_pos
+            vel_k3 = vel + 0.5 * k2_vel
+            acc3 = galaxy.acceleration(pos_k3, perturber_pos=pos_BH_k3)  # [N, 3]
             k3_vel = dt * acc3  # [N, 3]
-            k3_pos = dt * (vel + 0.5 * k2_vel)  # [N, 3]
+            k3_pos = dt * vel_k3  # [N, 3]
 
-            # k4
-            acc4 = galaxy.acceleration(pos + k3_pos)  # [N, 3]
+            # k4 for perturber
+            pos_BH_k4 = pos_BH + k3_pos_BH
+            vel_BH_k4 = vel_BH + k3_vel_BH
+            acc4_BH = galaxy.acceleration_single(pos_BH_k4)  # [3]
+            k4_vel_BH = dt * acc4_BH  # [3]
+            k4_pos_BH = dt * vel_BH_k4  # [3]
+
+            # k4 for stars
+            pos_k4 = pos + k3_pos
+            vel_k4 = vel + k3_vel
+            acc4 = galaxy.acceleration(pos_k4, perturber_pos=pos_BH_k4)  # [N, 3]
             k4_vel = dt * acc4  # [N, 3]
-            k4_pos = dt * (vel + k3_vel)  # [N, 3]
+            k4_pos = dt * vel_k4  # [N, 3]
 
-            # Update positions and velocities
-            pos += (k1_pos + 2 * k2_pos + 2 * k3_pos + k4_pos) / 6  # [N, 3]
-            vel += (k1_vel + 2 * k2_vel + 2 * k3_vel + k4_vel) / 6  # [N, 3]
+            # Update positions and velocities for perturber
+            pos_BH += (k1_pos_BH + 2 * k2_pos_BH + 2 * k3_pos_BH + k4_pos_BH) / 6
+            vel_BH += (k1_vel_BH + 2 * k2_vel_BH + 2 * k3_vel_BH + k4_vel_BH) / 6
+
+            # Update positions and velocities for stars
+            pos += (k1_pos + 2 * k2_pos + 2 * k3_pos + k4_pos) / 6
+            vel += (k1_vel + 2 * k2_vel + 2 * k3_vel + k4_vel) / 6
 
             positions[i] = pos
             velocities[i] = vel
 
-            # Compute kinetic and potential energy
+            positions_BH[i] = pos_BH
+            velocities_BH[i] = vel_BH
+
+            # Update galaxy's perturber position and velocity
+            galaxy.perturber.position = pos_BH
+            galaxy.perturber.velocity = vel_BH
+
+            # --- Compute Energies and Angular Momenta as before ---
+            # Kinetic Energy
             v = np.linalg.norm(vel, axis=1)  # [N]
+            kinetic_energy = 0.5 * v**2  # [N]
+
+            # Potential Energy
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
-            potential_energy = galaxy.potential(R, z)     # [N]
-            kinetic_energy = 0.5 * v**2  # [N]
+            potential_energy = galaxy.potential(R, z)  # [N]
+
+            if hasattr(galaxy, 'perturber'):
+                # Potential energy due to perturber
+                delta_r = pos_BH - pos  # [N, 3]
+                r = np.linalg.norm(delta_r, axis=1)  # [N]
+                potential_energy_pert = - galaxy.G * galaxy.perturber.mass / r  # [N]
+                potential_energy += potential_energy_pert
+
             energies[i] = kinetic_energy + potential_energy  # [N]
 
-            # Compute angular momentum (Lz component)
+            # --- Compute Angular Momentum (Lz) ---
             Lz = pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0]  # [N]
             angular_momenta[i] = Lz
 
             # Log progress every 10%
-            if (i+1) % max(1, (steps // 10)) == 0:
+            if (i + 1) % max(1, (steps // 10)) == 0:
                 logging.info(f"RK4 integration progress: {100 * (i+1) / steps:.1f}%")
 
         logging.info("RK4 integration completed.")
-        return positions, velocities, energies, angular_momenta
 
+        if hasattr(galaxy, 'perturber'):
+            return positions, velocities, energies, angular_momenta, positions_BH, velocities_BH
+        else:
+            return positions, velocities, energies, angular_momenta
 
 
 class Simulation(System):
@@ -568,6 +791,7 @@ class Simulation(System):
         plot_execution_time(): Plot execution times per step.
         compute_velocity_dispersions(): Compute and compare velocity dispersions.
         plot_velocity_histograms(): Plot histograms of initial and final velocity distributions.
+        log_integrator_differences(): Compute and log differences between integrators.
     """
 
     def __init__(self, galaxy, dt=0.05, t_max=250.0, integrators=['Leapfrog', 'RK4']):
@@ -592,6 +816,9 @@ class Simulation(System):
         self.energies = {}
         self.angular_momenta = {}
         self.execution_times = {}
+        self.perturber_positions = {}
+        self.perturber_velocities = {}
+
 
         # Validate integrators
         valid_integrators = ['Leapfrog', 'RK4']
@@ -616,51 +843,74 @@ class Simulation(System):
         logging.info(f"  Total simulation time (t_max): {self.t_max} (dimensionless)")
         logging.info(f"  Number of steps: {self.steps}")
 
+
+    def reset_system(self):
+        """
+        Reset all particles and the perturber to their initial conditions.
+        """
+        logging.info("Resetting system to initial conditions.")
+        # Reset all particles
+        for particle in self.galaxy.particles:
+            particle.reset()
+        
+        # Reset the perturber if it exists
+        if hasattr(self.galaxy, 'perturber'):
+            self.galaxy.perturber.reset()
+
     def run(self):
         """
         Run the simulation using the selected integrators.
         """
         logging.info("Starting the simulation.")
-
+    
         for integrator_name in self.integrators:
+            # Reset the system before each integrator run
+            self.reset_system()
+    
             if integrator_name == 'Leapfrog':
                 # Leapfrog Integration Timing
                 def run_leapfrog():
                     return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
-
+    
                 start_time = timeit.default_timer()
-                pos, vel, energy, Lz = run_leapfrog()
+                pos, vel, energy, Lz, pos_BH, vel_BH = run_leapfrog()
                 total_time = timeit.default_timer() - start_time
                 average_time = total_time / self.steps
                 logging.info(f"Leapfrog integration took {total_time:.3f} seconds in total.")
                 logging.info(f"Average time per step (Leapfrog): {average_time*1e3:.6f} ms.")
                 self.execution_times['Leapfrog'] = average_time * 1e3  # in ms
-
+    
                 # Store results
                 self.positions['Leapfrog'] = pos
                 self.velocities['Leapfrog'] = vel
                 self.energies['Leapfrog'] = energy
                 self.angular_momenta['Leapfrog'] = Lz
-
+                if pos_BH is not None:
+                    self.perturber_positions['Leapfrog'] = pos_BH
+                    self.perturber_velocities['Leapfrog'] = vel_BH
+    
             elif integrator_name == 'RK4':
                 # RK4 Integration Timing
                 def run_rk4():
                     return self.integrator.rk4(self.galaxy.particles, self.galaxy, self.dt, self.steps)
-
+    
                 start_time = timeit.default_timer()
-                pos, vel, energy, Lz = run_rk4()
+                pos, vel, energy, Lz, pos_BH, vel_BH = run_rk4()
                 total_time = timeit.default_timer() - start_time
                 average_time = total_time / self.steps
                 logging.info(f"RK4 integration took {total_time:.3f} seconds in total.")
                 logging.info(f"Average time per step (RK4): {average_time*1e3:.6f} ms.")
                 self.execution_times['RK4'] = average_time * 1e3  # in ms
-
+    
                 # Store results
                 self.positions['RK4'] = pos
                 self.velocities['RK4'] = vel
                 self.energies['RK4'] = energy
                 self.angular_momenta['RK4'] = Lz
-
+                if pos_BH is not None:
+                    self.perturber_positions['RK4'] = pos_BH
+                    self.perturber_velocities['RK4'] = vel_BH
+    
         logging.info("Simulation completed.")
 
     def plot_trajectories(self, subset=100):
@@ -684,8 +934,8 @@ class Simulation(System):
             plt.subplot(1, 2, 1)
             for i in indices:
                 plt.plot(pos[:, i, 0] * self.length_scale,
-                         pos[:, i, 1] * self.length_scale,
-                         linewidth=0.5, alpha=0.7)
+                        pos[:, i, 1] * self.length_scale,
+                        linewidth=0.5, alpha=0.7)
             plt.xlabel('x (kpc)', fontsize=12)
             plt.ylabel('y (kpc)', fontsize=12)
             plt.title(f'{integrator_name}: Orbit Trajectories in x-y Plane', fontsize=14)
@@ -696,19 +946,37 @@ class Simulation(System):
             plt.subplot(1, 2, 2)
             for i in indices:
                 plt.plot(pos[:, i, 0] * self.length_scale,
-                         pos[:, i, 2] * self.length_scale,
-                         linewidth=0.5, alpha=0.7)
+                        pos[:, i, 2] * self.length_scale,
+                        linewidth=0.5, alpha=0.7)
             plt.xlabel('x (kpc)', fontsize=12)
             plt.ylabel('z (kpc)', fontsize=12)
             plt.title(f'{integrator_name}: Orbit Trajectories in x-z Plane', fontsize=14)
             plt.grid(True)
             plt.axis('equal')
 
+            # Plot the perturber's trajectory
+            if integrator_name in self.perturber_positions:
+                pos_BH = self.perturber_positions[integrator_name]  # [steps, 3]
+                # x-y plot
+                plt.subplot(1, 2, 1)
+                plt.plot(pos_BH[:, 0] * self.length_scale,
+                        pos_BH[:, 1] * self.length_scale,
+                        color='red', linewidth=2, label='Perturber')
+                plt.legend()
+
+                # x-z plot
+                plt.subplot(1, 2, 2)
+                plt.plot(pos_BH[:, 0] * self.length_scale,
+                        pos_BH[:, 2] * self.length_scale,
+                        color='red', linewidth=2, label='Perturber')
+                plt.legend()
+
             plt.tight_layout()
             filename = f'orbit_{integrator_name.lower()}.png'
             plt.savefig(os.path.join(self.results_dir, filename))
             plt.close()
             logging.info(f"{integrator_name} orbit trajectories plots saved to '{self.results_dir}/{filename}'.")
+
 
     def plot_energy_error(self):
         """
@@ -789,86 +1057,6 @@ class Simulation(System):
         plt.savefig(os.path.join(self.results_dir, 'execution_times.png'))
         plt.close()
         logging.info(f"Execution time comparison plot saved to '{self.results_dir}/execution_times.png'.")
-
-    def plot_velocity_histograms(self, subset=200):
-        """
-        Plot histograms of initial and final velocity distributions.
-
-        Parameters:
-            subset (int): Number of stars to plot for clarity. Defaults to 200.
-        """
-        logging.info("Generating velocity histograms.")
-
-        N = len(self.galaxy.particles)
-        subset = min(subset, N)  # Ensure subset does not exceed total number of stars
-        indices = np.random.choice(N, subset, replace=False)  # Randomly select stars to plot
-
-        for integrator_name in self.integrators:
-            # Initial velocities
-            initial_vx = self.galaxy.initial_velocities[indices, 0]
-            initial_vy = self.galaxy.initial_velocities[indices, 1]
-            initial_vz = self.galaxy.initial_velocities[indices, 2]
-            initial_speed = np.linalg.norm(self.galaxy.initial_velocities[indices], axis=1)
-
-            # Final velocities from the integrator
-            final_vx = self.velocities[integrator_name][-1][indices, 0]
-            final_vy = self.velocities[integrator_name][-1][indices, 1]
-            final_vz = self.velocities[integrator_name][-1][indices, 2]
-            final_speed = np.linalg.norm(self.velocities[integrator_name][-1][indices], axis=1)
-
-            # Plot histograms for v_R, v_phi, v_z
-            plt.figure(figsize=(18, 6))
-
-            # Radial Velocity
-            plt.subplot(1, 3, 1)
-            plt.hist(initial_vx, bins=30, alpha=0.5, label='Initial $v_x$', color='blue', density=True)
-            plt.hist(final_vx, bins=30, alpha=0.5, label='Final $v_x$', color='green', density=True)
-            plt.xlabel('$v_x$ (dimensionless)', fontsize=12)
-            plt.ylabel('Normalized Frequency', fontsize=12)
-            plt.title(f'Radial Velocity Distribution ({integrator_name})', fontsize=14)
-            plt.legend(fontsize=12)
-            plt.grid(True)
-
-            # Azimuthal Velocity
-            plt.subplot(1, 3, 2)
-            plt.hist(initial_vy, bins=30, alpha=0.5, label='Initial $v_y$', color='blue', density=True)
-            plt.hist(final_vy, bins=30, alpha=0.5, label='Final $v_y$', color='green', density=True)
-            plt.xlabel('$v_y$ (dimensionless)', fontsize=12)
-            plt.ylabel('Normalized Frequency', fontsize=12)
-            plt.title(f'Azimuthal Velocity Distribution ({integrator_name})', fontsize=14)
-            plt.legend(fontsize=12)
-            plt.grid(True)
-
-            # Vertical Velocity
-            plt.subplot(1, 3, 3)
-            plt.hist(initial_vz, bins=30, alpha=0.5, label='Initial $v_z$', color='blue', density=True)
-            plt.hist(final_vz, bins=30, alpha=0.5, label='Final $v_z$', color='green', density=True)
-            plt.xlabel('$v_z$ (dimensionless)', fontsize=12)
-            plt.ylabel('Normalized Frequency', fontsize=12)
-            plt.title(f'Vertical Velocity Distribution ({integrator_name})', fontsize=14)
-            plt.legend(fontsize=12)
-            plt.grid(True)
-
-            plt.tight_layout()
-            filename = f'velocity_histograms_{integrator_name.lower()}.png'
-            plt.savefig(os.path.join(self.results_dir, filename))
-            plt.close()
-            logging.info(f"Velocity histograms for {integrator_name} saved to '{self.results_dir}/{filename}'.")
-
-            # Plot histogram for total speed
-            plt.figure(figsize=(12, 6))
-            plt.hist(initial_speed, bins=30, alpha=0.5, label='Initial Speed', color='blue', density=True)
-            plt.hist(final_speed, bins=30, alpha=0.5, label='Final Speed', color='green', density=True)
-            plt.xlabel('Speed (dimensionless)', fontsize=12)
-            plt.ylabel('Normalized Frequency', fontsize=12)
-            plt.title(f'Total Speed Distribution ({integrator_name})', fontsize=14)
-            plt.legend(fontsize=12)
-            plt.grid(True)
-            plt.tight_layout()
-            filename_speed = f'total_speed_histogram_{integrator_name.lower()}.png'
-            plt.savefig(os.path.join(self.results_dir, filename_speed))
-            plt.close()
-            logging.info(f"Total speed histogram for {integrator_name} saved to '{self.results_dir}/{filename_speed}'.")
 
     def compute_velocity_dispersions(self):
         """
@@ -1167,6 +1355,71 @@ class Simulation(System):
             plt.close()
             logging.info(f"Total speed histogram for {integrator_name} saved to '{self.results_dir}/{filename_speed}'.")
 
+    def log_integrator_differences(self):
+        """
+        Compute and log the differences between RK4 and Leapfrog integrators for stars and the perturber.
+        """
+        logging.info("Computing differences between RK4 and Leapfrog integrators.")
+
+        # Check if both integrators were run
+        if 'RK4' not in self.integrators or 'Leapfrog' not in self.integrators:
+            logging.warning("Both RK4 and Leapfrog integrators must be selected to compute differences.")
+            return
+
+        # Retrieve positions and velocities from both integrators
+        positions_RK4 = self.positions['RK4']
+        velocities_RK4 = self.velocities['RK4']
+        positions_Leapfrog = self.positions['Leapfrog']
+        velocities_Leapfrog = self.velocities['Leapfrog']
+
+        # Ensure that both integrators have the same number of steps and particles
+        if positions_RK4.shape != positions_Leapfrog.shape or velocities_RK4.shape != velocities_Leapfrog.shape:
+            logging.error("Integrator results have mismatched shapes. Cannot compute differences.")
+            return
+
+        # Compute differences at the final time step for stars
+        final_positions_RK4 = positions_RK4[-1]  # Shape: [N, 3]
+        final_positions_Leapfrog = positions_Leapfrog[-1]
+        final_velocities_RK4 = velocities_RK4[-1]
+        final_velocities_Leapfrog = velocities_Leapfrog[-1]
+
+        # Compute position and velocity differences for stars
+        position_diff = final_positions_RK4 - final_positions_Leapfrog
+        velocity_diff = final_velocities_RK4 - final_velocities_Leapfrog
+
+        # Compute RMS differences for stars
+        position_distance = np.sqrt(np.mean(np.sum(position_diff**2, axis=1)))
+        velocity_distance = np.sqrt(np.mean(np.sum(velocity_diff**2, axis=1)))
+
+        logging.info(f"Average position difference between RK4 and Leapfrog for stars: {position_distance:.6e} (dimensionless units)")
+        logging.info(f"Average velocity difference between RK4 and Leapfrog for stars: {velocity_distance:.6e} (dimensionless units)")
+
+        # If perturber data is available, compute differences for the perturber
+        if 'RK4' in self.perturber_positions and 'Leapfrog' in self.perturber_positions:
+            positions_BH_RK4 = self.perturber_positions['RK4']
+            velocities_BH_RK4 = self.perturber_velocities['RK4']
+            positions_BH_Leapfrog = self.perturber_positions['Leapfrog']
+            velocities_BH_Leapfrog = self.perturber_velocities['Leapfrog']
+
+            # Compute differences at the last time step for the perturber
+            final_position_BH_RK4 = positions_BH_RK4[-1]
+            final_position_BH_Leapfrog = positions_BH_Leapfrog[-1]
+            final_velocity_BH_RK4 = velocities_BH_RK4[-1]
+            final_velocity_BH_Leapfrog = velocities_BH_Leapfrog[-1]
+
+            # Compute position and velocity differences for the perturber
+            position_diff_BH = final_position_BH_RK4 - final_position_BH_Leapfrog
+            velocity_diff_BH = final_velocity_BH_RK4 - final_velocity_BH_Leapfrog
+
+            # Compute Euclidean distances for the perturber
+            position_distance_BH = np.sqrt(np.sum(position_diff_BH**2))
+            velocity_distance_BH = np.sqrt(np.sum(velocity_diff_BH**2))
+
+            logging.info(f"Position difference between RK4 and Leapfrog for perturber: {position_distance_BH:.6e} (dimensionless units)")
+            logging.info(f"Velocity difference between RK4 and Leapfrog for perturber: {velocity_distance_BH:.6e} (dimensionless units)")
+        else:
+            logging.warning("Perturber data is not available for both integrators.")
+
 
 def main():
     # ============================================================
@@ -1174,7 +1427,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 100000  # Increased number for better statistics
+    N_stars = 1000  # Increased number for better statistics
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
@@ -1188,6 +1441,16 @@ def main():
     # Initialize stars with the Schwarzschild velocity distribution
     galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
 
+    # Create Perturber instance
+    M_BH = 0.1  # Mass of the perturber (normalized)
+    initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
+    initial_velocity_BH = np.array([0.0, 0.0, -0.01])  # Initial velocity [vx, vy, vz]
+
+    perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
+
+    # Set the perturber in the galaxy
+    galaxy.set_perturber(perturber)
+
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
@@ -1196,10 +1459,10 @@ def main():
     t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
-    dt = 0.1  # Smaller time step for better accuracy
+    dt = 0.01  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['Leapfrog']  # Modify this list to select integrators
+    selected_integrators = ['RK4', 'Leapfrog']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)
@@ -1222,6 +1485,9 @@ def main():
 
     # Plot velocity histograms
     simulation.plot_velocity_histograms(subset=200)
+
+    # Compute and log differences between integrators
+    simulation.log_integrator_differences()
 
     # Save positions and velocities for each integrator
     for integrator_name in selected_integrators:
