@@ -4,7 +4,7 @@ import logging
 from scipy.stats import norm
 import timeit
 import os  # Import the os module for directory operations
-import concurrent.futures  # Import concurrent.futures for parallel execution
+from matplotlib.gridspec import GridSpec
 
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1608,7 +1608,10 @@ class Simulation(System):
         plt.close()
         logging.info(f"Galaxy equipotential x-y and x-z plane plots saved to '{self.results_dir}/{filename}'.")
 
-    def plot_galaxy_snapshots(self, n_snapshots=4, figsize=(20, 15)):
+    def plot_galaxy_snapshots(self, n_snapshots=4, figsize=None):
+        if figsize is None:
+            # Increase the figure size for better visibility
+            figsize = (20, n_snapshots * 5)
         """
         Generate and save black-and-white (grayscale) plots of the galaxy showing all stars
         and the perturber (if present) at multiple time snapshots.
@@ -1616,7 +1619,7 @@ class Simulation(System):
 
         Parameters:
             n_snapshots (int): Number of snapshots to plot. Defaults to 4.
-            figsize (tuple): Figure size in inches. Defaults to (20, 15).
+            figsize (tuple): Figure size in inches. Defaults to (20, n_snapshots * 5).
         """
         logging.info("Generating galaxy snapshots at multiple time steps.")
 
@@ -1626,47 +1629,51 @@ class Simulation(System):
         for integrator_name in self.integrators:
             logging.info(f"Generating snapshots for integrator: {integrator_name}")
 
-            # Create a figure with n_snapshots rows and 2 columns
-            fig, axs = plt.subplots(n_snapshots, 2, figsize=figsize)
+            # Create a figure
+            fig = plt.figure(figsize=figsize)
             
-            # If only one snapshot, make axs two-dimensional for consistency
-            if n_snapshots == 1:
-                axs = np.array([axs])
+            # Define GridSpec with 2 columns per snapshot row
+            # Adjust 'wspace' and 'hspace' to control spacing between subplots
+            # Adjust 'left', 'right', 'top', 'bottom' to control figure margins
+            gs = GridSpec(n_snapshots, 2, figure=fig, 
+                        wspace=-0.2,  # Horizontal space between subplots
+                        hspace=0.3,  # Vertical space between rows
+                        left=0.05, right=0.95, top=0.95, bottom=0.05)  # Margins
 
             for i, step in enumerate(snapshot_steps):
                 # Current simulation time in physical units (Myr)
                 current_time = self.times[step] * self.time_scale
 
                 # Plot for x-y plane
-                ax_xy = axs[i, 0]
+                ax_xy = fig.add_subplot(gs[i, 0])
                 star_positions_xy = self.positions[integrator_name][step]  # [N, 3]
                 ax_xy.scatter(
                     star_positions_xy[:, 0] * self.length_scale,
                     star_positions_xy[:, 1] * self.length_scale,
                     s=1, color='black', alpha=0.5
                 )
-                
+
                 # Plot perturber if present
                 if integrator_name in self.perturber_positions:
                     perturber_pos_xy = self.perturber_positions[integrator_name][step]
                     ax_xy.plot(
                         perturber_pos_xy[0] * self.length_scale,
                         perturber_pos_xy[1] * self.length_scale,
-                        marker='*', markersize=10, color='red', label='Perturber'
+                        marker='*', markersize=12, color='red', label='Perturber'
                     )
                     if i == 0:
-                        ax_xy.legend(fontsize=12)
+                        ax_xy.legend(fontsize=10, loc='upper right')
 
-                ax_xy.set_xlim(-10 * self.length_scale, 10 * self.length_scale)
-                ax_xy.set_ylim(-10 * self.length_scale, 10 * self.length_scale)
-                ax_xy.set_xlabel('x (kpc)', fontsize=12)
-                ax_xy.set_ylabel('y (kpc)', fontsize=12)
-                ax_xy.set_title(f'x-y Plane at t = {current_time:.2f} Myr', fontsize=14)
+                ax_xy.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
+                ax_xy.set_ylim(-15 * self.length_scale, 15 * self.length_scale)
+                ax_xy.set_xlabel('x (kpc)', fontsize=14)
+                ax_xy.set_ylabel('y (kpc)', fontsize=14)
+                ax_xy.set_title(f'x-y Plane at t = {current_time:.2f} Myr', fontsize=16)
                 ax_xy.grid(True, linestyle='--', alpha=0.5)
                 ax_xy.set_aspect('equal')
 
                 # Plot for x-z plane
-                ax_xz = axs[i, 1]
+                ax_xz = fig.add_subplot(gs[i, 1])
                 star_positions_xz = self.positions[integrator_name][step]  # [N, 3]
                 ax_xz.scatter(
                     star_positions_xz[:, 0] * self.length_scale,
@@ -1680,22 +1687,21 @@ class Simulation(System):
                     ax_xz.plot(
                         perturber_pos_xz[0] * self.length_scale,
                         perturber_pos_xz[2] * self.length_scale,
-                        marker='*', markersize=10, color='red', label='Perturber'
+                        marker='*', markersize=12, color='red', label='Perturber'
                     )
                     if i == 0:
-                        ax_xz.legend(fontsize=12)
+                        ax_xz.legend(fontsize=10, loc='upper right')
 
-                ax_xz.set_xlim(-10 * self.length_scale, 10 * self.length_scale)
+                ax_xz.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
                 ax_xz.set_ylim(-5 * self.length_scale, 5 * self.length_scale)
-                ax_xz.set_xlabel('x (kpc)', fontsize=12)
-                ax_xz.set_ylabel('z (kpc)', fontsize=12)
-                ax_xz.set_title(f'x-z Plane at t = {current_time:.2f} Myr', fontsize=14)
+                ax_xz.set_xlabel('x (kpc)', fontsize=14)
+                ax_xz.set_ylabel('z (kpc)', fontsize=14)
+                ax_xz.set_title(f'x-z Plane at t = {current_time:.2f} Myr', fontsize=16)
                 ax_xz.grid(True, linestyle='--', alpha=0.5)
                 ax_xz.set_aspect('equal')
 
-            plt.tight_layout()
             filename = f'galaxy_snapshots_{integrator_name.lower()}.png'
-            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
             plt.close()
             logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
@@ -1706,7 +1712,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 1000  # Increased number for better statistics
+    N_stars = 10000  # Increased number for better statistics
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
@@ -1723,7 +1729,7 @@ def main():
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([-0.35, 0.0, 0.0])  # Initial velocity [vx, vy, vz]
+    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
@@ -1735,7 +1741,7 @@ def main():
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 5  # Simulate for 1 orbital period at Rmax
+    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy
