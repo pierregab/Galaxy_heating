@@ -300,157 +300,162 @@ class Galaxy(System):
         return rho
 
     def initialize_stars(self, N, Rmax, alpha=0.05, max_iterations=100):
-            """
-            Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
+        """
+        Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
 
-            Parameters:
-                N (int): Number of stars to initialize.
-                Rmax (float): Maximum radial distance (dimensionless).
-                alpha (float): Small parameter for radial displacement (default: 0.05).
-                max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
-            """
-            logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
+        Parameters:
+            N (int): Number of stars to initialize.
+            Rmax (float): Maximum radial distance (dimensionless).
+            alpha (float): Small parameter for radial displacement (default: 0.05).
+            max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
+        """
+        logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
 
-            # Generate positions
-            R_c = np.random.uniform(0, Rmax, N)  # Reference radii
-            phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
+        # Calculate mass per star
+        mass_per_star = self.M / N  # Distribute galaxy mass equally among stars
+        logging.info(f"Mass per star: {mass_per_star:.6e} (normalized units)")
 
-            # Small radial displacements x = R - R_c
-            x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
-            R = R_c + x                                         # Actual radial positions
+        # Generate positions
+        R_c = np.random.uniform(0, Rmax, N)  # Reference radii
+        phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
 
-            # Ensure R is positive
-            R = np.abs(R)
+        # Small radial displacements x = R - R_c
+        x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
+        R = R_c + x                                         # Actual radial positions
 
-            # Positions in Cartesian coordinates
-            x_pos = R * np.cos(phi)
-            y_pos = R * np.sin(phi)
-            z_pos = np.zeros(N)  # All stars lie in the galactic plane
+        # Ensure R is positive
+        R = np.abs(R)
 
-            # Compute circular velocity at R
-            v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
+        # Positions in Cartesian coordinates
+        x_pos = R * np.cos(phi)
+        y_pos = R * np.sin(phi)
+        z_pos = np.zeros(N)  # All stars lie in the galactic plane
 
-            # Angular frequency Omega
-            Omega = self.omega(R)
+        # Compute circular velocity at R
+        v_c = np.sqrt(R * (-self.dPhidr(R)))  # Circular velocity at R
 
-            # Epicyclic frequency kappa
-            kappa = self.kappa(R)
-            kappa_squared = kappa**2
+        # Angular frequency Omega
+        Omega = self.omega(R)
 
-            # Gamma parameter
-            gamma = 2 * Omega / kappa
+        # Epicyclic frequency kappa
+        kappa = self.kappa(R)
+        kappa_squared = kappa**2
 
-            # Corrected Radial velocity dispersion sigma_R
-            sigma_R_squared = (alpha**2) * R_c**2 * kappa_squared
-            sigma_R = np.sqrt(sigma_R_squared)
+        # Gamma parameter
+        gamma = 2 * Omega / kappa
 
-            # Compute mass density rho at R_c, z=0
-            rho_midplane = self.rho(R_c, z=0)
+        # Corrected Radial velocity dispersion sigma_R
+        sigma_R_squared = (alpha**2) * R_c**2 * kappa_squared
+        sigma_R = np.sqrt(sigma_R_squared)
 
-            # Corrected Vertical velocity dispersion sigma_z
-            sigma_z_squared = self.b**2 * self.G * rho_midplane
-            sigma_z = np.sqrt(sigma_z_squared)
+        # Compute mass density rho at R_c, z=0
+        rho_midplane = self.rho(R_c, z=0)
 
-            # Store initial dispersions for later comparison
+        # Corrected Vertical velocity dispersion sigma_z
+        sigma_z_squared = self.b**2 * self.G * rho_midplane
+        sigma_z = np.sqrt(sigma_z_squared)
+
+        # Store initial dispersions for later comparison
+        self.initial_sigma_R = sigma_R.copy()
+        self.initial_sigma_z = sigma_z.copy()
+        self.R_c = R_c.copy()  # Store R_c for each star
+
+        # Initialize arrays for velocities
+        v_R = np.zeros(N)
+        v_phi = np.zeros(N)
+        v_z = np.zeros(N)
+
+        iterations = 0
+        unbound = np.ones(N, dtype=bool)  # Initially, all stars are unbound to enter the loop
+
+        while np.any(unbound) and iterations < max_iterations:
+            logging.info(f"Velocity generation iteration {iterations + 1}")
+
+            # Generate velocities for unbound stars
+            idx_unbound = np.where(unbound)[0]
+            num_unbound = len(idx_unbound)
+
+            if num_unbound == 0:
+                break  # All stars are bound
+
+            v_R_new = np.random.normal(0, sigma_R[idx_unbound])
+            v_z_new = np.random.normal(0, sigma_z[idx_unbound])
+            v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
+
+            # Compute angular momentum L_z for these stars
+            L_z_new = R[idx_unbound] * v_phi_new
+
+            # Compute total mechanical energy per unit mass
+            kinetic_energy_new = 0.5 * (v_R_new**2 + v_z_new**2)        # Radial and vertical kinetic energy
+            rotational_energy_new = 0.5 * (L_z_new**2) / R[idx_unbound]**2      # Rotational kinetic energy
+            potential_energy_new = self.potential(R[idx_unbound], z_pos[idx_unbound])     # Gravitational potential
+            E_total_new = kinetic_energy_new + rotational_energy_new + potential_energy_new  # [N]
+
+            # Compute escape speed squared
+            escape_speed_squared = -2 * potential_energy_new
+
+            # Total speed squared
+            total_speed_squared = v_R_new**2 + v_phi_new**2 + v_z_new**2
+
+            # Identify stars with total energy >= 0 or speed exceeding escape speed
+            unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
+            unbound[idx_unbound] = unbound_new
+
+            # Update velocities for bound stars
+            bound_indices = idx_unbound[~unbound_new]
+            v_R[bound_indices] = v_R_new[~unbound_new]
+            v_z[bound_indices] = v_z_new[~unbound_new]
+            v_phi[bound_indices] = v_phi_new[~unbound_new]
+
+            logging.info(f"  {np.sum(~unbound_new)} stars bound in this iteration.")
+            iterations += 1
+
+        if iterations == max_iterations and np.any(unbound):
+            num_remaining = np.sum(unbound)
+            logging.warning(f"Maximum iterations reached. {num_remaining} stars remain unbound.")
+            # Remove unbound stars
+            idx_bound = np.where(~unbound)[0]
+            R = R[idx_bound]
+            phi = phi[idx_bound]
+            x_pos = x_pos[idx_bound]
+            y_pos = y_pos[idx_bound]
+            z_pos = z_pos[idx_bound]
+            v_R = v_R[idx_bound]
+            v_phi = v_phi[idx_bound]
+            v_z = v_z[idx_bound]
+            sigma_R = sigma_R[idx_bound]
+            sigma_z = sigma_z[idx_bound]
+            R_c = R_c[idx_bound]
             self.initial_sigma_R = sigma_R.copy()
             self.initial_sigma_z = sigma_z.copy()
-            self.R_c = R_c.copy()  # Store R_c for each star
+            self.R_c = R_c.copy()
+            N = len(idx_bound)
+            mass_per_star = self.M / N  # Recalculate mass per star if some stars are removed
+            logging.info(f"Proceeding with {N} bound stars with updated mass per star: {mass_per_star:.6e}")
+        else:
+            logging.info(f"All {N} stars initialized as bound orbits.")
 
-            # Initialize arrays for velocities
-            v_R = np.zeros(N)
-            v_phi = np.zeros(N)
-            v_z = np.zeros(N)
+        # Convert velocities to Cartesian coordinates
+        v_x = v_R * np.cos(phi) - v_phi * np.sin(phi)
+        v_y = v_R * np.sin(phi) + v_phi * np.cos(phi)
 
-            iterations = 0
-            unbound = np.ones(N, dtype=bool)  # Initially, all stars are unbound to enter the loop
+        # Create Particle instances with assigned mass
+        for i in range(N):
+            position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
+            velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
+            particle = Particle(position, velocity, mass=mass_per_star)  # Assign finite mass
+            self.particles.append(particle)
 
-            while np.any(unbound) and iterations < max_iterations:
-                logging.info(f"Velocity generation iteration {iterations + 1}")
+        # Store initial data for later comparison
+        self.initial_R = R.copy()
+        self.initial_phi = phi.copy()
+        self.initial_positions = np.column_stack((x_pos, y_pos, z_pos))
+        self.initial_velocities = np.column_stack((v_x, v_y, v_z))
+        self.initial_v_R = v_R.copy()
+        self.initial_v_z = v_z.copy()
+        self.initial_v_phi = v_phi.copy()
 
-                # Generate velocities for unbound stars
-                idx_unbound = np.where(unbound)[0]
-                num_unbound = len(idx_unbound)
-
-                if num_unbound == 0:
-                    break  # All stars are bound
-
-                v_R_new = np.random.normal(0, sigma_R[idx_unbound])
-                v_z_new = np.random.normal(0, sigma_z[idx_unbound])
-                v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
-
-                # Compute angular momentum L_z for these stars
-                L_z_new = R[idx_unbound] * v_phi_new
-
-                # Compute total mechanical energy per unit mass
-                kinetic_energy_new = 0.5 * (v_R_new**2 + v_z_new**2)        # Radial and vertical kinetic energy
-                rotational_energy_new = 0.5 * (L_z_new**2) / R[idx_unbound]**2      # Rotational kinetic energy
-                potential_energy_new = self.potential(R[idx_unbound], z_pos[idx_unbound])     # Gravitational potential
-                E_total_new = kinetic_energy_new + rotational_energy_new + potential_energy_new  # [N]
-
-                # Compute escape speed squared
-                escape_speed_squared = -2 * potential_energy_new
-
-                # Total speed squared
-                total_speed_squared = v_R_new**2 + v_phi_new**2 + v_z_new**2
-
-                # Identify stars with total energy >= 0 or speed exceeding escape speed
-                unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
-                unbound[idx_unbound] = unbound_new
-
-                # Update velocities for bound stars
-                bound_indices = idx_unbound[~unbound_new]
-                v_R[bound_indices] = v_R_new[~unbound_new]
-                v_z[bound_indices] = v_z_new[~unbound_new]
-                v_phi[bound_indices] = v_phi_new[~unbound_new]
-
-                logging.info(f"  {np.sum(~unbound_new)} stars bound in this iteration.")
-                iterations += 1
-
-            if iterations == max_iterations and np.any(unbound):
-                num_remaining = np.sum(unbound)
-                logging.warning(f"Maximum iterations reached. {num_remaining} stars remain unbound.")
-                # Remove unbound stars
-                idx_bound = np.where(~unbound)[0]
-                R = R[idx_bound]
-                phi = phi[idx_bound]
-                x_pos = x_pos[idx_bound]
-                y_pos = y_pos[idx_bound]
-                z_pos = z_pos[idx_bound]
-                v_R = v_R[idx_bound]
-                v_phi = v_phi[idx_bound]
-                v_z = v_z[idx_bound]
-                sigma_R = sigma_R[idx_bound]
-                sigma_z = sigma_z[idx_bound]
-                R_c = R_c[idx_bound]
-                self.initial_sigma_R = sigma_R.copy()
-                self.initial_sigma_z = sigma_z.copy()
-                self.R_c = R_c.copy()
-                N = len(idx_bound)
-                logging.info(f"Proceeding with {N} bound stars.")
-            else:
-                logging.info(f"All {N} stars initialized as bound orbits.")
-
-            # Convert velocities to Cartesian coordinates
-            v_x = v_R * np.cos(phi) - v_phi * np.sin(phi)
-            v_y = v_R * np.sin(phi) + v_phi * np.cos(phi)
-
-            # Create Particle instances
-            for i in range(N):
-                position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
-                velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
-                particle = Particle(position, velocity)
-                self.particles.append(particle)
-
-            # Store initial data for later comparison
-            self.initial_R = R.copy()
-            self.initial_phi = phi.copy()
-            self.initial_positions = np.column_stack((x_pos, y_pos, z_pos))
-            self.initial_velocities = np.column_stack((v_x, v_y, v_z))
-            self.initial_v_R = v_R.copy()
-            self.initial_v_z = v_z.copy()
-            self.initial_v_phi = v_phi.copy()
-
-            logging.info(f"Initialization complete with {N} particles.")
+        logging.info(f"Initialization complete with {N} particles, each with mass {mass_per_star:.6e}.")
 
 
 class Particle:
@@ -521,18 +526,18 @@ class Integrator:
     def leapfrog(self, particles, galaxy, dt, steps):
         """
         Leapfrog integrator for orbit simulation, including the perturber.
-        
+
         This implementation follows the Kick-Drift-Kick scheme:
         1. Kick: Update velocities by half-step using current accelerations.
         2. Drift: Update positions by full-step using updated velocities.
         3. Kick: Update velocities by another half-step using new accelerations.
-        
+
         Parameters:
             particles (list of Particle): List of particles to integrate.
             galaxy (Galaxy): The galaxy instance containing the potential and perturber.
             dt (float): Time step.
             steps (int): Number of integration steps.
-        
+
         Returns:
             positions (np.ndarray): Positions of particles at each step [steps, N, 3].
             velocities (np.ndarray): Velocities of particles at each step [steps, N, 3].
@@ -558,6 +563,7 @@ class Integrator:
         # Initialize positions and velocities
         pos = np.array([particle.position for particle in particles])  # [N, 3]
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
+        masses = np.array([particle.mass for particle in particles])  # [N]
 
         # If there is a perturber, initialize its position and velocity
         if hasattr(galaxy, 'perturber'):
@@ -621,27 +627,32 @@ class Integrator:
                 galaxy.perturber.velocity = vel_BH_full
 
             # --- Compute kinetic and potential energy for stars ---
-            v = np.linalg.norm(vel_full, axis=1)  # [N]
+            # Corrected kinetic energy computation
+            v_squared = np.sum(vel_full ** 2, axis=1)  # [N]
+            kinetic_energy = 0.5 * masses * v_squared  # [N]
+
+            # Potential energy from the galaxy's potential
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
             potential_energy = galaxy.potential(R, z)     # [N]
+            potential_energy *= masses  # [N]
 
             # Add potential energy due to the perturber
             if hasattr(galaxy, 'perturber'):
                 delta_r = pos_BH - pos  # [N, 3]
                 r = np.linalg.norm(delta_r, axis=1)  # [N]
-                # Handle cases where r is zero to avoid division by zero
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    potential_energy_pert = - galaxy.G * galaxy.perturber.mass / r  # [N]
+                    # Compute PE = -G * m_p * m_i / r
+                    potential_energy_pert = -galaxy.G * galaxy.perturber.mass * masses / r  # [N]
                     potential_energy_pert = np.nan_to_num(potential_energy_pert)  # Replace NaNs with zero
-                potential_energy += potential_energy_pert
+                potential_energy += potential_energy_pert  # [N]
 
-            kinetic_energy = 0.5 * v**2  # [N]
+            # Total energy per particle
             energies[i] = kinetic_energy + potential_energy  # [N]
 
             # --- Compute angular momentum (Lz component) ---
             Lz = pos[:, 0] * vel_full[:, 1] - pos[:, 1] * vel_full[:, 0]  # [N]
-            angular_momenta[i] = Lz
+            angular_momenta[i] = Lz * masses  # [N]
 
             # --- Compute and Store Perturber's Energy ---
             if hasattr(galaxy, 'perturber') and energies_BH is not None:
@@ -652,16 +663,13 @@ class Integrator:
                 R_BH = np.sqrt(pos_BH[0]**2 + pos_BH[1]**2)
                 PE_BH_galaxy = galaxy.potential(R_BH, pos_BH[2])
 
-                # --- NEW PART: Potential Energy due to Stars ---
+                # --- Potential Energy due to Stars ---
                 # Compute the gravitational potential at the perturber's position due to all stars
                 delta_r_BH = pos_BH - pos  # [N, 3]
                 r_BH = np.linalg.norm(delta_r_BH, axis=1)  # [N]
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    # Retrieve masses of all stars (should be zero for test particles)
-                    masses = np.array([particle.mass for particle in particles])  # [N]
-                    potential_energy_stars = - galaxy.G * np.sum(masses / r_BH)
+                    potential_energy_stars = -galaxy.G * np.sum(masses / r_BH)
                     potential_energy_stars = 0.0 if np.isnan(potential_energy_stars) else potential_energy_stars
-
 
                 # Total Potential Energy of Perturber
                 PE_BH = PE_BH_galaxy + potential_energy_stars
@@ -682,6 +690,21 @@ class Integrator:
     def rk4(self, particles, galaxy, dt, steps):
         """
         Runge-Kutta 4th order integrator for orbit simulation, including the perturber.
+
+        Parameters:
+            particles (list of Particle): List of particles to integrate.
+            galaxy (Galaxy): The galaxy instance containing the potential and perturber.
+            dt (float): Time step.
+            steps (int): Number of integration steps.
+
+        Returns:
+            positions (np.ndarray): Positions of particles at each step [steps, N, 3].
+            velocities (np.ndarray): Velocities of particles at each step [steps, N, 3].
+            energies (np.ndarray): Total energies of particles at each step [steps, N].
+            angular_momenta (np.ndarray): Angular momenta (Lz) of particles at each step [steps, N].
+            energies_BH (np.ndarray or None): Total energies of the perturber at each step [steps] or None.
+            positions_BH (np.ndarray or None): Positions of the perturber at each step [steps, 3] or None.
+            velocities_BH (np.ndarray or None): Velocities of the perturber at each step [steps, 3] or None.
         """
         logging.info("Starting RK4 integration.")
         N = len(particles)
@@ -696,6 +719,7 @@ class Integrator:
         # Initialize positions and velocities for stars
         pos = np.array([particle.position for particle in particles])  # [N, 3]
         vel = np.array([particle.velocity for particle in particles])  # [N, 3]
+        masses = np.array([particle.mass for particle in particles])  # [N]
 
         # If there is a perturber, initialize its position and velocity
         if hasattr(galaxy, 'perturber'):
@@ -782,37 +806,54 @@ class Integrator:
             galaxy.perturber.velocity = vel_BH
 
             # --- Compute Energies and Angular Momenta as before ---
+
             # Kinetic Energy
-            v = np.linalg.norm(vel, axis=1)  # [N]
-            kinetic_energy = 0.5 * v**2  # [N]
+            v_squared = np.sum(vel ** 2, axis=1)  # [N]
+            kinetic_energy = 0.5 * masses * v_squared  # [N]
 
             # Potential Energy
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
             potential_energy = galaxy.potential(R, z)  # [N]
+            potential_energy *= masses  # [N]
 
             if hasattr(galaxy, 'perturber'):
                 # Potential energy due to perturber
                 delta_r = pos_BH - pos  # [N, 3]
                 r = np.linalg.norm(delta_r, axis=1)  # [N]
-                potential_energy_pert = - galaxy.G * galaxy.perturber.mass / r  # [N]
-                potential_energy += potential_energy_pert
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    potential_energy_pert = -galaxy.G * galaxy.perturber.mass * masses / r  # [N]
+                    potential_energy_pert = np.nan_to_num(potential_energy_pert)  # Replace NaNs with zero
+                potential_energy += potential_energy_pert  # [N]
 
             energies[i] = kinetic_energy + potential_energy  # [N]
 
             # --- Compute Angular Momentum (Lz) ---
             Lz = pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0]  # [N]
-            angular_momenta[i] = Lz
+            angular_momenta[i] = Lz * masses  # [N]
 
             # --- Compute and Store Perturber's Energy ---
             if hasattr(galaxy, 'perturber'):
                 # Kinetic Energy of Perturber
-                # Corrected computation with mass included
                 KE_BH = 0.5 * galaxy.perturber.mass * np.dot(vel_BH, vel_BH)
-                PE_BH = galaxy.perturber.mass * galaxy.potential(np.sqrt(pos_BH[0]**2 + pos_BH[1]**2), pos_BH[2])
+
+                # Potential Energy due to Galaxy
+                R_BH = np.sqrt(pos_BH[0]**2 + pos_BH[1]**2)
+                PE_BH_galaxy = galaxy.potential(R_BH, pos_BH[2])
+
+                # --- Potential Energy due to Stars ---
+                # Compute the gravitational potential at the perturber's position due to all stars
+                delta_r_BH = pos_BH - pos  # [N, 3]
+                r_BH = np.linalg.norm(delta_r_BH, axis=1)  # [N]
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    potential_energy_stars = -galaxy.G * np.sum(masses / r_BH)
+                    potential_energy_stars = 0.0 if np.isnan(potential_energy_stars) else potential_energy_stars
+
+                # Total Potential Energy of Perturber
+                PE_BH = PE_BH_galaxy + potential_energy_stars
 
                 # Total Energy of Perturber
-                energies_BH[i] = KE_BH + PE_BH
+                energies_BH[i] = KE_BH + galaxy.perturber.mass * PE_BH
 
             # --- Log progress every 10% ---
             if (i + 1) % max(1, (steps // 10)) == 0:
@@ -824,7 +865,6 @@ class Integrator:
             return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
         else:
             return positions, velocities, energies, angular_momenta
-
 
 
 class Simulation(System):
