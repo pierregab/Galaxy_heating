@@ -184,7 +184,7 @@ class Galaxy(System):
             delta_r = perturber_pos - pos  # [N, 3]
             r = np.linalg.norm(delta_r, axis=1)  # [N]
             with np.errstate(divide='ignore', invalid='ignore'):
-                acc_pert = self.G * self.perturber.mass * delta_r / r[:, None]**3
+                acc_pert = -self.G * self.perturber.mass * delta_r / r[:, None]**3
                 acc_pert = np.nan_to_num(acc_pert)
             acc += acc_pert
 
@@ -462,15 +462,17 @@ class Particle:
         velocity (np.ndarray): Velocity vector [vx, vy, vz].
         energy (float): Energy of the particle.
         angular_momentum (float): Angular momentum of the particle.
+        mass (float): Mass of the particle.
     """
 
-    def __init__(self, position, velocity):
+    def __init__(self, position, velocity, mass=0.0):
         self.initial_position = np.copy(position)
         self.initial_velocity = np.copy(velocity)
         self.position = np.copy(position)
         self.velocity = np.copy(velocity)
         self.energy = None
         self.angular_momentum = None
+        self.mass = mass  # New attribute for mass
 
     def reset(self):
         """
@@ -480,6 +482,8 @@ class Particle:
         self.velocity = np.copy(self.initial_velocity)
         self.energy = None
         self.angular_momentum = None
+        self.mass = 0.0  # Reset mass to zero if needed
+
 
 class Perturber:
     """
@@ -517,23 +521,24 @@ class Integrator:
     def leapfrog(self, particles, galaxy, dt, steps):
         """
         Leapfrog integrator for orbit simulation, including the perturber.
-
+        
         This implementation follows the Kick-Drift-Kick scheme:
         1. Kick: Update velocities by half-step using current accelerations.
         2. Drift: Update positions by full-step using updated velocities.
         3. Kick: Update velocities by another half-step using new accelerations.
-
+        
         Parameters:
             particles (list of Particle): List of particles to integrate.
             galaxy (Galaxy): The galaxy instance containing the potential and perturber.
             dt (float): Time step.
             steps (int): Number of integration steps.
-
+        
         Returns:
             positions (np.ndarray): Positions of particles at each step [steps, N, 3].
             velocities (np.ndarray): Velocities of particles at each step [steps, N, 3].
             energies (np.ndarray): Total energies of particles at each step [steps, N].
             angular_momenta (np.ndarray): Angular momenta (Lz) of particles at each step [steps, N].
+            energies_BH (np.ndarray or None): Total energies of the perturber at each step [steps] or None.
             positions_BH (np.ndarray or None): Positions of the perturber at each step [steps, 3] or None.
             velocities_BH (np.ndarray or None): Velocities of the perturber at each step [steps, 3] or None.
         """
@@ -544,6 +549,11 @@ class Integrator:
         velocities = np.zeros((steps, N, 3))
         energies = np.zeros((steps, N))
         angular_momenta = np.zeros((steps, N))
+        
+        if hasattr(galaxy, 'perturber'):
+            energies_BH = np.zeros(steps)  # Array to store perturber's energy
+        else:
+            energies_BH = None
 
         # Initialize positions and velocities
         pos = np.array([particle.position for particle in particles])  # [N, 3]
@@ -610,7 +620,7 @@ class Integrator:
                 velocities_BH[i] = vel_BH_full
                 galaxy.perturber.velocity = vel_BH_full
 
-            # --- Compute kinetic and potential energy ---
+            # --- Compute kinetic and potential energy for stars ---
             v = np.linalg.norm(vel_full, axis=1)  # [N]
             R = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2)  # [N]
             z = pos[:, 2]  # [N]
@@ -633,14 +643,40 @@ class Integrator:
             Lz = pos[:, 0] * vel_full[:, 1] - pos[:, 1] * vel_full[:, 0]  # [N]
             angular_momenta[i] = Lz
 
+            # --- Compute and Store Perturber's Energy ---
+            if hasattr(galaxy, 'perturber') and energies_BH is not None:
+                # Kinetic Energy of Perturber
+                KE_BH = 0.5 * galaxy.perturber.mass * np.dot(vel_BH_full, vel_BH_full)
+
+                # Potential Energy due to Galaxy
+                R_BH = np.sqrt(pos_BH[0]**2 + pos_BH[1]**2)
+                PE_BH_galaxy = galaxy.potential(R_BH, pos_BH[2])
+
+                # --- NEW PART: Potential Energy due to Stars ---
+                # Compute the gravitational potential at the perturber's position due to all stars
+                delta_r_BH = pos_BH - pos  # [N, 3]
+                r_BH = np.linalg.norm(delta_r_BH, axis=1)  # [N]
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    # Retrieve masses of all stars (should be zero for test particles)
+                    masses = np.array([particle.mass for particle in particles])  # [N]
+                    potential_energy_stars = - galaxy.G * np.sum(masses / r_BH)
+                    potential_energy_stars = 0.0 if np.isnan(potential_energy_stars) else potential_energy_stars
+
+
+                # Total Potential Energy of Perturber
+                PE_BH = PE_BH_galaxy + potential_energy_stars
+
+                # Total Energy of Perturber
+                energies_BH[i] = KE_BH + galaxy.perturber.mass * PE_BH
+
             # --- Log progress every 10% ---
             if (i+1) % max(1, (steps // 10)) == 0:
                 logging.info(f"Leapfrog integration progress: {100 * (i+1) / steps:.1f}%")
 
         logging.info("Leapfrog integration completed.")
 
-        # Return positions and velocities of stars and perturber
-        return positions, velocities, energies, angular_momenta, positions_BH, velocities_BH
+        # Return positions and velocities of stars and perturber, along with energies
+        return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
 
 
     def rk4(self, particles, galaxy, dt, steps):
@@ -653,6 +689,7 @@ class Integrator:
         velocities = np.zeros((steps, N, 3))
         energies = np.zeros((steps, N))
         angular_momenta = np.zeros((steps, N))
+        energies_BH = np.zeros(steps)  # Array to store perturber's energy
         positions_BH = None
         velocities_BH = None
 
@@ -767,16 +804,27 @@ class Integrator:
             Lz = pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0]  # [N]
             angular_momenta[i] = Lz
 
-            # Log progress every 10%
+            # --- Compute and Store Perturber's Energy ---
+            if hasattr(galaxy, 'perturber'):
+                # Kinetic Energy of Perturber
+                # Corrected computation with mass included
+                KE_BH = 0.5 * galaxy.perturber.mass * np.dot(vel_BH, vel_BH)
+                PE_BH = galaxy.perturber.mass * galaxy.potential(np.sqrt(pos_BH[0]**2 + pos_BH[1]**2), pos_BH[2])
+
+                # Total Energy of Perturber
+                energies_BH[i] = KE_BH + PE_BH
+
+            # --- Log progress every 10% ---
             if (i + 1) % max(1, (steps // 10)) == 0:
                 logging.info(f"RK4 integration progress: {100 * (i+1) / steps:.1f}%")
 
         logging.info("RK4 integration completed.")
 
         if hasattr(galaxy, 'perturber'):
-            return positions, velocities, energies, angular_momenta, positions_BH, velocities_BH
+            return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
         else:
             return positions, velocities, energies, angular_momenta
+
 
 
 class Simulation(System):
@@ -816,9 +864,9 @@ class Simulation(System):
         self.energies = {}
         self.angular_momenta = {}
         self.execution_times = {}
+        self.energies_BH = {}  # Dictionary to store perturber's energy for each integrator
         self.perturber_positions = {}
         self.perturber_velocities = {}
-
 
         # Validate integrators
         valid_integrators = ['Leapfrog', 'RK4']
@@ -843,7 +891,6 @@ class Simulation(System):
         logging.info(f"  Total simulation time (t_max): {self.t_max} (dimensionless)")
         logging.info(f"  Number of steps: {self.steps}")
 
-
     def reset_system(self):
         """
         Reset all particles and the perturber to their initial conditions.
@@ -862,55 +909,57 @@ class Simulation(System):
         Run the simulation using the selected integrators.
         """
         logging.info("Starting the simulation.")
-    
+
         for integrator_name in self.integrators:
             # Reset the system before each integrator run
             self.reset_system()
-    
+
             if integrator_name == 'Leapfrog':
                 # Leapfrog Integration Timing
                 def run_leapfrog():
                     return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
-    
+
                 start_time = timeit.default_timer()
-                pos, vel, energy, Lz, pos_BH, vel_BH = run_leapfrog()
+                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH = run_leapfrog()
                 total_time = timeit.default_timer() - start_time
                 average_time = total_time / self.steps
                 logging.info(f"Leapfrog integration took {total_time:.3f} seconds in total.")
                 logging.info(f"Average time per step (Leapfrog): {average_time*1e3:.6f} ms.")
                 self.execution_times['Leapfrog'] = average_time * 1e3  # in ms
-    
+
                 # Store results
                 self.positions['Leapfrog'] = pos
                 self.velocities['Leapfrog'] = vel
                 self.energies['Leapfrog'] = energy
                 self.angular_momenta['Leapfrog'] = Lz
+                self.energies_BH['Leapfrog'] = energies_BH
                 if pos_BH is not None:
                     self.perturber_positions['Leapfrog'] = pos_BH
                     self.perturber_velocities['Leapfrog'] = vel_BH
-    
+
             elif integrator_name == 'RK4':
                 # RK4 Integration Timing
                 def run_rk4():
                     return self.integrator.rk4(self.galaxy.particles, self.galaxy, self.dt, self.steps)
-    
+
                 start_time = timeit.default_timer()
-                pos, vel, energy, Lz, pos_BH, vel_BH = run_rk4()
+                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH = run_rk4()
                 total_time = timeit.default_timer() - start_time
                 average_time = total_time / self.steps
                 logging.info(f"RK4 integration took {total_time:.3f} seconds in total.")
                 logging.info(f"Average time per step (RK4): {average_time*1e3:.6f} ms.")
                 self.execution_times['RK4'] = average_time * 1e3  # in ms
-    
+
                 # Store results
                 self.positions['RK4'] = pos
                 self.velocities['RK4'] = vel
                 self.energies['RK4'] = energy
                 self.angular_momenta['RK4'] = Lz
+                self.energies_BH['RK4'] = energies_BH
                 if pos_BH is not None:
                     self.perturber_positions['RK4'] = pos_BH
                     self.perturber_velocities['RK4'] = vel_BH
-    
+
         logging.info("Simulation completed.")
 
     def plot_trajectories(self, subset=100):
@@ -980,34 +1029,63 @@ class Simulation(System):
 
     def plot_energy_error(self):
         """
-        Plot the energy conservation error over time.
+        Plot the total energy conservation error over time for each integrator.
         """
-        logging.info("Generating energy conservation error plot.")
+        logging.info("Generating total energy conservation error plot.")
 
         plt.figure(figsize=(12, 8))
+
         for integrator_name in self.integrators:
+            # Ensure that energy data for the integrator exists
+            if integrator_name not in self.energies or (hasattr(self.galaxy, 'perturber') and integrator_name not in self.energies_BH):
+                logging.warning(f"Energy data for integrator '{integrator_name}' is incomplete. Skipping.")
+                continue
+
             # Time array in physical units
             times_physical = self.times * self.time_scale  # Time in Myr
 
-            # Compute total energy
-            E0 = self.energies[integrator_name][0]  # [N]
-            E_error = (self.energies[integrator_name] - E0) / np.abs(E0)  # [steps, N]
+            # Stars' energies: [steps, N]
+            E_stars = self.energies[integrator_name]  # [steps, N]
 
-            # Compute average energy error across all stars
-            avg_E_error = np.mean(np.abs(E_error), axis=1)  # [steps]
+            # Sum stars' energies at each step to get total stars' energy
+            total_E_stars = np.sum(E_stars, axis=1)  # [steps]
 
-            plt.plot(times_physical, avg_E_error, label=integrator_name, linewidth=1)
+            if hasattr(self.galaxy, 'perturber'):
+                # Perturber's energies: [steps]
+                E_BH = self.energies_BH[integrator_name]  # [steps]
+
+                # System's total energy at each step
+                total_E_system = total_E_stars + E_BH  # [steps]
+            else:
+                # If no perturber, system's total energy is stars' total energy
+                total_E_system = total_E_stars  # [steps]
+
+            # Initial total energy
+            E_total_initial = total_E_system[0]  # Scalar
+
+            # Compute relative energy error
+            relative_E_error = (total_E_system - E_total_initial) / np.abs(E_total_initial)  # [steps]
+
+            # Plot the relative energy error
+            plt.plot(
+                times_physical,
+                np.abs(relative_E_error),  # Taking absolute value for better visualization
+                label=f"{integrator_name}",
+                linewidth=1
+            )
 
         plt.xlabel('Time (Myr)', fontsize=14)
-        plt.ylabel('Relative Energy Error', fontsize=14)
-        plt.title('Energy Conservation Error Over Time', fontsize=16)
+        plt.ylabel('Relative Total Energy Error', fontsize=14)
+        plt.title('Total Energy Conservation Error Over Time', fontsize=16)
         plt.legend(fontsize=12)
         plt.grid(True)
-        plt.yscale('log')
+        plt.yscale('log')  # Using logarithmic scale to capture small errors
         plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'energy_error.png'))
+        plt.savefig(os.path.join(self.results_dir, 'total_energy_error.png'))
         plt.close()
-        logging.info(f"Energy conservation error plot saved to '{self.results_dir}/energy_error.png'.")
+        logging.info(f"Total energy conservation error plot saved to '{self.results_dir}/total_energy_error.png'.")
+
+
 
     def plot_angular_momentum_error(self):
         """
@@ -1444,7 +1522,7 @@ def main():
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.0, -0.01])  # Initial velocity [vx, vy, vz]
+    initial_velocity_BH = np.array([0.0, 0.0, 0.0])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
@@ -1462,7 +1540,7 @@ def main():
     dt = 0.01  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['RK4', 'Leapfrog']  # Modify this list to select integrators
+    selected_integrators = ['RK4','Leapfrog']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)
