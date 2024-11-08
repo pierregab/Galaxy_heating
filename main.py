@@ -36,8 +36,8 @@ def main() -> None:
 
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([0.0, 0.0, 4.0])  # Initial position [x, y, z]
-    initial_velocity_BH = 0*np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
+    initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
+    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
@@ -49,7 +49,7 @@ def main() -> None:
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 10  # Simulate for 1 orbital period at Rmax
+    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy
@@ -88,6 +88,7 @@ def main() -> None:
     simulation.log_integrator_differences()
 
     # Save positions and velocities for each integrator
+    """
     for integrator_name in selected_integrators:
         np.save(os.path.join(simulation.results_dir, f'positions_{integrator_name.lower()}.npy'),
                 simulation.positions[integrator_name])
@@ -95,6 +96,7 @@ def main() -> None:
                 simulation.velocities[integrator_name])
 
     logging.info("All simulation data and plots have been saved.")
+    """
 
 
 if __name__ == '__main__':

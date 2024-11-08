@@ -29,4 +29,5 @@ class Particle:
         self.velocity = np.copy(self.initial_velocity)
         self.energy = None
         self.angular_momentum = None
+        self.mass = 0.0  # Reset mass to 0.0
         return self
