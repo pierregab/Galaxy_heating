@@ -188,7 +188,7 @@ class Galaxy(System):
         rho = M * b**2 * numerator / (4 * np.pi * denom * D**3)
         return rho
 
-    def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100) -> "Galaxy":
+    def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100) -> None:
         """
         Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
 
@@ -347,7 +347,7 @@ class Galaxy(System):
 
         logging.info(f"Initialization complete with {N} particles, each with mass {mass_per_star:.6e}.")
 
-    def circular_velocity(self, R):
+    def circular_velocity(self, R:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the circular velocity at radius R.
         """
