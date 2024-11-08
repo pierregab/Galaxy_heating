@@ -20,7 +20,7 @@ def main():
     # ============================================================
 
     # Number of stars
-    N_stars = 1000  # Increased number for better statistics
+    N_stars = 10000  # Increased number for better statistics
 
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
@@ -37,7 +37,7 @@ def main():
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.0, 0.0])  # Initial velocity [vx, vy, vz]
+    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
@@ -52,13 +52,16 @@ def main():
     t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
-    dt = 0.01  # Smaller time step for better accuracy
+    dt = 0.1  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['RK4','Leapfrog']  # Modify this list to select integrators
+    selected_integrators = ['Leapfrog']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)
+
+    # Plot the galaxy potential before running the simulation
+    simulation.plot_equipotential()
 
     # Run the simulation
     simulation.run()
@@ -69,6 +72,7 @@ def main():
 
     # Generate plots using the Simulation class methods
     simulation.plot_trajectories(subset=200)  # Plot a subset of 200 stars for clarity
+    simulation.plot_galaxy_snapshots(n_snapshots=4)  # Plot 4 snapshots
     simulation.plot_energy_error()
     simulation.plot_angular_momentum_error()
     simulation.plot_execution_time()
