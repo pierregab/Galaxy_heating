@@ -212,7 +212,6 @@ class Simulation(System):
             plt.close()
             logging.info(f"{integrator_name} orbit trajectories plots saved to '{self.results_dir}/{filename}'.")
 
-
     def plot_energy_error(self) -> None:
         """
         Plot the total energy conservation error over time for each integrator.
