@@ -345,7 +345,7 @@ class Galaxy(System):
         gamma = 2 * Omega / kappa
 
         # Corrected Radial velocity dispersion sigma_R
-        sigma_R_squared = (alpha**2) * R_c**2 * kappa_squared
+        sigma_R_squared = 2/3 * (alpha**2) * R_c**2 * kappa_squared
         sigma_R = np.sqrt(sigma_R_squared)
 
         # Compute mass density rho at R_c, z=0
@@ -380,7 +380,8 @@ class Galaxy(System):
 
             v_R_new = np.random.normal(0, sigma_R[idx_unbound])
             v_z_new = np.random.normal(0, sigma_z[idx_unbound])
-            v_phi_new = v_c[idx_unbound] - gamma[idx_unbound] * v_R_new
+            #v_phi_new = v_c[idx_unbound] + (1 + 2*np.random.randint(-1,1)) * gamma[idx_unbound] * v_R_new 
+            v_phi_new = v_c[idx_unbound] + np.random.normal(0, sigma_R[idx_unbound])
 
             # Compute angular momentum L_z for these stars
             L_z_new = R[idx_unbound] * v_phi_new
@@ -1728,8 +1729,8 @@ def main():
 
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
+    initial_position_BH = np.array([0.0, 0.0, 4.0])  # Initial position [x, y, z]
+    initial_velocity_BH = 0*np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
