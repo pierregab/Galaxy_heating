@@ -1,4 +1,5 @@
 from system import System
+from galaxy import Galaxy
 from integrators import Integrator
 import os  # Import the os module for directory operations
 import timeit
@@ -26,7 +27,7 @@ class Simulation(System):
         log_integrator_differences(): Compute and log differences between integrators.
     """
 
-    def __init__(self, galaxy, dt=0.05, t_max=250.0, integrators=['Leapfrog', 'RK4']):
+    def __init__(self, galaxy:Galaxy, dt:float=0.05, t_max:float=250.0, integrators:list[str]=['Leapfrog', 'RK4']) -> None:
         """
         Initialize the Simulation.
 
@@ -36,7 +37,7 @@ class Simulation(System):
             t_max (float): Total simulation time (dimensionless).
             integrators (list): List of integrators to run. Options: 'Leapfrog', 'RK4'.
         """
-        super().__init__()
+        super().__init__(self.__class__.__name__)
         self.galaxy = galaxy
         self.dt = dt
         self.t_max = t_max
@@ -75,7 +76,7 @@ class Simulation(System):
         logging.info(f"  Total simulation time (t_max): {self.t_max} (dimensionless)")
         logging.info(f"  Number of steps: {self.steps}")
 
-    def reset_system(self):
+    def reset_system(self) -> "Simulation":
         """
         Reset all particles and the perturber to their initial conditions.
         """
@@ -87,8 +88,9 @@ class Simulation(System):
         # Reset the perturber if it exists
         if hasattr(self.galaxy, 'perturber'):
             self.galaxy.perturber.reset()
+        return self
 
-    def run(self):
+    def run(self) -> None:
         """
         Run the simulation using the selected integrators.
         """
@@ -146,7 +148,7 @@ class Simulation(System):
 
         logging.info("Simulation completed.")
 
-    def plot_trajectories(self, subset=100):
+    def plot_trajectories(self, subset:int=100) -> None:
         """
         Plot the orbit trajectories in the xy-plane and xz-plane separately for each integrator.
 
@@ -211,7 +213,7 @@ class Simulation(System):
             logging.info(f"{integrator_name} orbit trajectories plots saved to '{self.results_dir}/{filename}'.")
 
 
-    def plot_energy_error(self):
+    def plot_energy_error(self) -> None:
         """
         Plot the total energy conservation error over time for each integrator.
         """
@@ -269,9 +271,7 @@ class Simulation(System):
         plt.close()
         logging.info(f"Total energy conservation error plot saved to '{self.results_dir}/total_energy_error.png'.")
 
-
-
-    def plot_angular_momentum_error(self):
+    def plot_angular_momentum_error(self) -> None:
         """
         Plot the angular momentum conservation error over time.
         """
@@ -301,7 +301,7 @@ class Simulation(System):
         plt.close()
         logging.info(f"Angular momentum conservation error plot saved to '{self.results_dir}/angular_momentum_error.png'.")
 
-    def plot_execution_time(self):
+    def plot_execution_time(self) -> None:
         """
         Plot execution times per step for the integrators.
         """
@@ -320,7 +320,7 @@ class Simulation(System):
         plt.close()
         logging.info(f"Execution time comparison plot saved to '{self.results_dir}/execution_times.png'.")
 
-    def compute_velocity_dispersions(self):
+    def compute_velocity_dispersions(self) -> None:
         """
         Compute the radial and vertical velocity dispersions at specific moments
         (start, 1/3, 2/3, final) after integration and compare them to the initial values.
@@ -535,9 +535,7 @@ class Simulation(System):
                                 f"σ_z = {sigma_z:.4f} ± {sigma_z_unc:.4f}, "
                                 f"Initial σ_R = {sigma_R_init_val:.4f}, Initial σ_z = {sigma_z_init_val:.4f}")
 
-
-
-    def plot_velocity_histograms(self, subset=200):
+    def plot_velocity_histograms(self, subset:int=200) -> None:
         """
         Plot histograms of initial and final velocity distributions.
 
@@ -617,7 +615,7 @@ class Simulation(System):
             plt.close()
             logging.info(f"Total speed histogram for {integrator_name} saved to '{self.results_dir}/{filename_speed}'.")
 
-    def log_integrator_differences(self):
+    def log_integrator_differences(self) -> None:
         """
         Compute and log the differences between RK4 and Leapfrog integrators for stars and the perturber.
         """
@@ -682,7 +680,7 @@ class Simulation(System):
         else:
             logging.warning("Perturber data is not available for both integrators.")
 
-    def plot_equipotential(self):
+    def plot_equipotential(self) -> None:
         """
         Generate and save black-and-white (grayscale) equipotential line plots
         of the galaxy potential in the x-y and x-z planes, showing the entire galaxy.
@@ -752,7 +750,7 @@ class Simulation(System):
         plt.close()
         logging.info(f"Galaxy equipotential x-y and x-z plane plots saved to '{self.results_dir}/{filename}'.")
 
-    def plot_galaxy_snapshots(self, n_snapshots=4, figsize=None):
+    def plot_galaxy_snapshots(self, n_snapshots:int=4, figsize:tuple[float, float]|None=None) -> None:
         if figsize is None:
             # Increase the figure size for better visibility
             figsize = (20, n_snapshots * 5)
