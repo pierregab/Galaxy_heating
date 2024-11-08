@@ -20,7 +20,7 @@ class Galaxy(System):
         set_perturber(perturber): Set the perturber for the galaxy.
     """
 
-    def __init__(self, mass=1.0, a=2.0, b=None):
+    def __init__(self, mass:float=1.0, a:float=2.0, b:float=None):
         super().__init__()
         self.M = mass        # Mass (normalized)
         self.a = a           # Radial scale length (normalized to R0)
@@ -63,6 +63,7 @@ class Galaxy(System):
             perturber (Perturber): The perturber object.
         """
         self.perturber = perturber
+        perturber.setGalaxy(self)
         logging.info("Perturber has been set in the galaxy.")
 
 
@@ -99,31 +100,6 @@ class Galaxy(System):
                 acc_pert = -self.G * self.perturber.mass * delta_r / r[:, None]**3
                 acc_pert = np.nan_to_num(acc_pert)
             acc += acc_pert
-
-        return acc
-
-    def acceleration_single(self, pos):
-        """
-        Compute the acceleration at a single position due to the galaxy's potential.
-
-        Parameters:
-            pos : np.ndarray
-                Position array [3].
-
-        Returns:
-            np.ndarray
-                Acceleration vector [3].
-        """
-        x = pos[0]
-        y = pos[1]
-        z = pos[2]
-        R = np.sqrt(x**2 + y**2)
-        z_term = np.sqrt(z**2 + self.b**2)
-        denom = (R**2 + (self.a + z_term)**2)**1.5
-        ax = -self.G * self.M * x / denom
-        ay = -self.G * self.M * y / denom
-        az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
-        acc = np.array([ax, ay, az])
 
         return acc
 

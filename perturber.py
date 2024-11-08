@@ -21,6 +21,35 @@ class Perturber:
         self.velocity = np.copy(velocity)
         logging.info(f"Perturber initialized with mass {self.mass}, position {self.position}, and velocity {self.velocity}.")
 
+    def setGalaxy(self, galaxy):
+        self.galaxy = galaxy
+
+    def acceleration(self, pos):
+        """
+        Compute the acceleration at a single position due to the galaxy's potential.
+
+        Parameters:
+            pos : np.ndarray
+                Position array [3].
+
+        Returns:
+            np.ndarray
+                Acceleration vector [3].
+        """
+        x = pos[0]
+        y = pos[1]
+        z = pos[2]
+        R = np.sqrt(x**2 + y**2)
+        galaxy = self.galaxy
+        z_term = np.sqrt(z**2 + galaxy.b**2)
+        denom = (R**2 + (galaxy.a + z_term)**2)**1.5
+        ax = -galaxy.G * galaxy.M * x / denom
+        ay = -galaxy.G * galaxy.M * y / denom
+        az = -galaxy.G * galaxy.M * (galaxy.a + z_term) * z / (z_term * denom)
+        acc = np.array([ax, ay, az])
+
+        return acc
+
     def reset(self):
         """
         Reset the perturber to its initial conditions.
