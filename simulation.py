@@ -6,6 +6,8 @@ import logging
 import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -679,3 +681,170 @@ class Simulation(System):
             logging.info(f"Velocity difference between RK4 and Leapfrog for perturber: {velocity_distance_BH:.6e} (dimensionless units)")
         else:
             logging.warning("Perturber data is not available for both integrators.")
+
+    def plot_equipotential(self):
+        """
+        Generate and save black-and-white (grayscale) equipotential line plots
+        of the galaxy potential in the x-y and x-z planes, showing the entire galaxy.
+        Both plots are included in the same figure with specified limits.
+        """
+        logging.info("Generating equipotential line plots in x-y and x-z planes.")
+
+        # Define the plot limits
+        x_max = 10.0  # in dimensionless units
+        y_max = 10.0
+        z_max = 10.0
+
+        # Define grid resolution
+        grid_points_xy = 500  # Higher for smoother contours in x-y
+        grid_points_xz = 500  # Higher for smoother contours in x-z
+
+        # --- Equipotential in x-y Plane ---
+        x = np.linspace(-x_max, x_max, grid_points_xy)
+        y = np.linspace(-y_max, y_max, grid_points_xy)
+        X_xy, Y_xy = np.meshgrid(x, y)
+        Z_xy = np.zeros_like(X_xy)  # z=0 for x-y plane
+
+        # Compute potential at each (x, y, z=0)
+        R_xy = np.sqrt(X_xy**2 + Y_xy**2)
+        potential_xy = self.galaxy.potential(R_xy, Z_xy)
+
+        # --- Equipotential in x-z Plane ---
+        x = np.linspace(-x_max, x_max, grid_points_xz)
+        z = np.linspace(-z_max, z_max, grid_points_xz)
+        X_xz, Z_xz = np.meshgrid(x, z)
+        Y_xz = np.zeros_like(X_xz)  # y=0 for x-z plane
+
+        # Compute potential at each (x, y=0, z)
+        R_xz = np.sqrt(X_xz**2 + Y_xz**2)
+        potential_xz = self.galaxy.potential(R_xz, Z_xz)
+
+        # Create a single figure with two subplots
+        fig, axs = plt.subplots(1, 2, figsize=(16, 7))
+
+        # Plot equipotential in x-y plane
+        levels_xy = np.linspace(np.min(potential_xy), np.max(potential_xy), 50)
+        cs_xy = axs[0].contour(X_xy * self.length_scale, Y_xy * self.length_scale, potential_xy,
+                               levels=levels_xy, colors='black', linewidths=0.5)
+        axs[0].set_xlabel('x (kpc)', fontsize=14)
+        axs[0].set_ylabel('y (kpc)', fontsize=14)
+        axs[0].set_title('Equipotential Lines in x-y Plane', fontsize=16)
+        axs[0].set_xlim(-x_max * self.length_scale, x_max * self.length_scale)
+        axs[0].set_ylim(-y_max * self.length_scale, y_max * self.length_scale)
+        axs[0].set_aspect('equal')
+        axs[0].grid(True, linestyle='--', alpha=0.5)
+
+        # Plot equipotential in x-z plane
+        levels_xz = np.linspace(np.min(potential_xz), np.max(potential_xz), 50)
+        cs_xz = axs[1].contour(X_xz * self.length_scale, Z_xz * self.length_scale, potential_xz,
+                               levels=levels_xz, colors='black', linewidths=0.5)
+        axs[1].set_xlabel('x (kpc)', fontsize=14)
+        axs[1].set_ylabel('z (kpc)', fontsize=14)
+        axs[1].set_title('Equipotential Lines in x-z Plane', fontsize=16)
+        axs[1].set_xlim(-x_max * self.length_scale, x_max * self.length_scale)
+        axs[1].set_ylim(-z_max * self.length_scale, z_max * self.length_scale)
+        axs[1].set_aspect('equal')
+        axs[1].grid(True, linestyle='--', alpha=0.5)
+
+        plt.tight_layout()
+        filename = 'galaxy_equipotential_xy_xz.png'
+        plt.savefig(os.path.join(self.results_dir, filename))
+        plt.close()
+        logging.info(f"Galaxy equipotential x-y and x-z plane plots saved to '{self.results_dir}/{filename}'.")
+
+    def plot_galaxy_snapshots(self, n_snapshots=4, figsize=None):
+        if figsize is None:
+            # Increase the figure size for better visibility
+            figsize = (20, n_snapshots * 5)
+        """
+        Generate and save black-and-white (grayscale) plots of the galaxy showing all stars
+        and the perturber (if present) at multiple time snapshots.
+        Each snapshot includes two subplots: x-y plane and x-z plane.
+
+        Parameters:
+            n_snapshots (int): Number of snapshots to plot. Defaults to 4.
+            figsize (tuple): Figure size in inches. Defaults to (20, n_snapshots * 5).
+        """
+        logging.info("Generating galaxy snapshots at multiple time steps.")
+
+        # Define the snapshot steps (equally spaced)
+        snapshot_steps = np.linspace(0, self.steps - 1, n_snapshots, dtype=int)
+
+        for integrator_name in self.integrators:
+            logging.info(f"Generating snapshots for integrator: {integrator_name}")
+
+            # Create a figure
+            fig = plt.figure(figsize=figsize)
+            
+            # Define GridSpec with 2 columns per snapshot row
+            # Adjust 'wspace' and 'hspace' to control spacing between subplots
+            # Adjust 'left', 'right', 'top', 'bottom' to control figure margins
+            gs = GridSpec(n_snapshots, 2, figure=fig, 
+                        wspace=-0.2,  # Horizontal space between subplots
+                        hspace=0.3,  # Vertical space between rows
+                        left=0.05, right=0.95, top=0.95, bottom=0.05)  # Margins
+
+            for i, step in enumerate(snapshot_steps):
+                # Current simulation time in physical units (Myr)
+                current_time = self.times[step] * self.time_scale
+
+                # Plot for x-y plane
+                ax_xy = fig.add_subplot(gs[i, 0])
+                star_positions_xy = self.positions[integrator_name][step]  # [N, 3]
+                ax_xy.scatter(
+                    star_positions_xy[:, 0] * self.length_scale,
+                    star_positions_xy[:, 1] * self.length_scale,
+                    s=1, color='black', alpha=0.5
+                )
+
+                # Plot perturber if present
+                if integrator_name in self.perturber_positions:
+                    perturber_pos_xy = self.perturber_positions[integrator_name][step]
+                    ax_xy.plot(
+                        perturber_pos_xy[0] * self.length_scale,
+                        perturber_pos_xy[1] * self.length_scale,
+                        marker='*', markersize=12, color='red', label='Perturber'
+                    )
+                    if i == 0:
+                        ax_xy.legend(fontsize=10, loc='upper right')
+
+                ax_xy.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
+                ax_xy.set_ylim(-15 * self.length_scale, 15 * self.length_scale)
+                ax_xy.set_xlabel('x (kpc)', fontsize=14)
+                ax_xy.set_ylabel('y (kpc)', fontsize=14)
+                ax_xy.set_title(f'x-y Plane at t = {current_time:.2f} Myr', fontsize=16)
+                ax_xy.grid(True, linestyle='--', alpha=0.5)
+                ax_xy.set_aspect('equal')
+
+                # Plot for x-z plane
+                ax_xz = fig.add_subplot(gs[i, 1])
+                star_positions_xz = self.positions[integrator_name][step]  # [N, 3]
+                ax_xz.scatter(
+                    star_positions_xz[:, 0] * self.length_scale,
+                    star_positions_xz[:, 2] * self.length_scale,
+                    s=1, color='black', alpha=0.5
+                )
+
+                # Plot perturber if present
+                if integrator_name in self.perturber_positions:
+                    perturber_pos_xz = self.perturber_positions[integrator_name][step]
+                    ax_xz.plot(
+                        perturber_pos_xz[0] * self.length_scale,
+                        perturber_pos_xz[2] * self.length_scale,
+                        marker='*', markersize=12, color='red', label='Perturber'
+                    )
+                    if i == 0:
+                        ax_xz.legend(fontsize=10, loc='upper right')
+
+                ax_xz.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
+                ax_xz.set_ylim(-5 * self.length_scale, 5 * self.length_scale)
+                ax_xz.set_xlabel('x (kpc)', fontsize=14)
+                ax_xz.set_ylabel('z (kpc)', fontsize=14)
+                ax_xz.set_title(f'x-z Plane at t = {current_time:.2f} Myr', fontsize=16)
+                ax_xz.grid(True, linestyle='--', alpha=0.5)
+                ax_xz.set_aspect('equal')
+
+            filename = f'galaxy_snapshots_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
+            plt.close()
+            logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
