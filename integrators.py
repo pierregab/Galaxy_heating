@@ -62,7 +62,7 @@ class Integrator:
             velocities_BH = np.zeros((steps, 3))
 
             # Calculate initial acceleration for the perturber
-            acc_BH = galaxy.acceleration_single(pos_BH)
+            acc_BH = perturber.acceleration(pos_BH)
 
             # Initialize half-step velocity for the perturber
             vel_BH_half = vel_BH + 0.5 * dt * acc_BH
@@ -96,7 +96,7 @@ class Integrator:
             if hasattr(galaxy, 'perturber'):
                 # Compute accelerations using the updated perturber position
                 acc_new = galaxy.acceleration(pos, perturber_pos=pos_BH)  # [N, 3]
-                acc_BH_new = galaxy.acceleration_single(pos_BH)  # [3]
+                acc_BH_new = perturber.acceleration(pos_BH)  # [3]
             else:
                 acc_new = galaxy.acceleration(pos)  # [N, 3]
 
@@ -222,7 +222,7 @@ class Integrator:
             # --- RK4 for Stars and Perturber ---
 
             # k1 for perturber
-            acc1_BH = galaxy.acceleration_single(pos_BH)  # [3]
+            acc1_BH = perturber.acceleration(pos_BH)  # [3]
             k1_vel_BH = dt * acc1_BH  # [3]
             k1_pos_BH = dt * vel_BH  # [3]
 
@@ -234,7 +234,7 @@ class Integrator:
             # k2 for perturber
             pos_BH_k2 = pos_BH + 0.5 * k1_pos_BH
             vel_BH_k2 = vel_BH + 0.5 * k1_vel_BH
-            acc2_BH = galaxy.acceleration_single(pos_BH_k2)  # [3]
+            acc2_BH = perturber.acceleration(pos_BH_k2)  # [3]
             k2_vel_BH = dt * acc2_BH  # [3]
             k2_pos_BH = dt * vel_BH_k2  # [3]
 
@@ -248,7 +248,7 @@ class Integrator:
             # k3 for perturber
             pos_BH_k3 = pos_BH + 0.5 * k2_pos_BH
             vel_BH_k3 = vel_BH + 0.5 * k2_vel_BH
-            acc3_BH = galaxy.acceleration_single(pos_BH_k3)  # [3]
+            acc3_BH = perturber.acceleration(pos_BH_k3)  # [3]
             k3_vel_BH = dt * acc3_BH  # [3]
             k3_pos_BH = dt * vel_BH_k3  # [3]
 
@@ -262,7 +262,7 @@ class Integrator:
             # k4 for perturber
             pos_BH_k4 = pos_BH + k3_pos_BH
             vel_BH_k4 = vel_BH + k3_vel_BH
-            acc4_BH = galaxy.acceleration_single(pos_BH_k4)  # [3]
+            acc4_BH = perturber.acceleration(pos_BH_k4)  # [3]
             k4_vel_BH = dt * acc4_BH  # [3]
             k4_pos_BH = dt * vel_BH_k4  # [3]
 
