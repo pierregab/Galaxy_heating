@@ -1,4 +1,5 @@
 from system import System
+from perturber import Perturber
 from particle import Particle
 import logging
 import numpy as np
@@ -20,8 +21,8 @@ class Galaxy(System):
         set_perturber(perturber): Set the perturber for the galaxy.
     """
 
-    def __init__(self, mass:float=1.0, a:float=2.0, b:float=None):
-        super().__init__()
+    def __init__(self, mass:float=1.0, a:float=2.0, b:float=None) -> None:
+        super().__init__(self.__class__.__name__, log=True)
         self.M = mass        # Mass (normalized)
         self.a = a           # Radial scale length (normalized to R0)
         if b is None:
@@ -38,7 +39,7 @@ class Galaxy(System):
         # Initialize list to hold Particle instances
         self.particles = []
 
-    def potential(self, R, z):
+    def potential(self, R:float|np.ndarray[float], z:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the gravitational potential at a given (R, z).
 
@@ -55,7 +56,7 @@ class Galaxy(System):
         denom = np.sqrt(R**2 + (self.a + np.sqrt(z**2 + self.b**2))**2)
         return -self.G * self.M / denom
     
-    def set_perturber(self, perturber):
+    def set_perturber(self, perturber:Perturber) -> "Galaxy":
         """
         Set the perturber for the galaxy.
 
@@ -65,9 +66,9 @@ class Galaxy(System):
         self.perturber = perturber
         perturber.setGalaxy(self)
         logging.info("Perturber has been set in the galaxy.")
+        return self
 
-
-    def acceleration(self, pos, perturber_pos=None):
+    def acceleration(self, pos:np.ndarray[float], perturber_pos=None) -> np.ndarray[float]:
         """
         Compute the acceleration vectors at given positions, including the effect of the perturber if present.
 
@@ -103,7 +104,7 @@ class Galaxy(System):
 
         return acc
 
-    def dPhidr(self, R, z=0):
+    def dPhidr(self, R:float|np.ndarray[float], z:float|np.ndarray[float]=0) -> float|np.ndarray[float]:
         """
         Compute the derivative of the potential with respect to R at given R and z.
 
@@ -123,7 +124,7 @@ class Galaxy(System):
         dPhi_dR = -self.G * self.M * R / denom**3
         return dPhi_dR
 
-    def omega(self, R):
+    def omega(self, R:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the angular frequency Omega at radius R.
 
@@ -139,7 +140,7 @@ class Galaxy(System):
         Omega = np.sqrt(R * (-dPhi_dR)) / R
         return Omega
 
-    def kappa(self, R):
+    def kappa(self, R:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the epicyclic frequency kappa at radius R.
 
@@ -162,7 +163,7 @@ class Galaxy(System):
         kappa_squared = np.maximum(kappa_squared, 0)  # Avoid negative values due to numerical errors
         return np.sqrt(kappa_squared)
     
-    def rho(self, R, z=0):
+    def rho(self, R:float|np.ndarray[float], z:float|np.ndarray[float]=0) -> float|np.ndarray[float]:
         """
         Compute the mass density rho at a given R and z for the Miyamoto-Nagai potential.
 
@@ -187,7 +188,7 @@ class Galaxy(System):
         rho = M * b**2 * numerator / (4 * np.pi * denom * D**3)
         return rho
 
-    def initialize_stars(self, N, Rmax, alpha=0.05, max_iterations=100):
+    def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100) -> "Galaxy":
         """
         Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
 
@@ -289,7 +290,7 @@ class Galaxy(System):
             # Identify stars with total energy >= 0 or speed exceeding escape speed
             unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
             unbound[idx_unbound] = unbound_new
-
+ 
             # Update velocities for bound stars
             bound_indices = idx_unbound[~unbound_new]
             v_R[bound_indices] = v_R_new[~unbound_new]
@@ -345,3 +346,4 @@ class Galaxy(System):
         self.initial_v_phi = v_phi.copy()
 
         logging.info(f"Initialization complete with {N} particles, each with mass {mass_per_star:.6e}.")
+        return self

@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 plt.rcParams['figure.dpi'] = 150
 
 
-def main():
+def main() -> None:
     # ============================================================
     # Initial Conditions (Dimensionless Units)
     # ============================================================

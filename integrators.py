@@ -1,3 +1,4 @@
+from galaxy import Galaxy
 import logging
 import numpy as np
 # Set up professional logging
@@ -9,7 +10,7 @@ class Integrator:
     Integrator class containing integration methods.
     """
 
-    def leapfrog(self, particles, galaxy, dt, steps):
+    def leapfrog(self, particles:list, galaxy:Galaxy, dt:float, steps:int) -> tuple[np.ndarray]:
         """
         Leapfrog integrator for orbit simulation, including the perturber.
 
@@ -172,8 +173,7 @@ class Integrator:
         # Return positions and velocities of stars and perturber, along with energies
         return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
 
-
-    def rk4(self, particles, galaxy, dt, steps):
+    def rk4(self, particles:list, galaxy:Galaxy, dt:float, steps:int) -> tuple[np.ndarray]:
         """
         Runge-Kutta 4th order integrator for orbit simulation, including the perturber.
 

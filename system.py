@@ -15,9 +15,9 @@ class System:
         - G (float): Gravitational constant in simulation units (normalized).
     '''
 
-    def __init__(self):
+    def __init__(self, className:str, log:bool=False) -> None:
         # Logging simulation properties
-        logging.info("Initializing system with the following properties:")
+        logging.info(f"Initializing system {className} with the following properties:")
 
         # ------------------------------------------------------------
         # Physical Units (Astrophysical Units)
@@ -31,25 +31,26 @@ class System:
         self.G_physical = 4.498e-12  # G = 4.498 x 10^-12 kpc^3 Msun^-1 Myr^-2
 
         # Physical constants
-        self.M0 = 1e11           # Mass unit in solar masses (Msun)
-        self.R0 = 1              # Length unit in kiloparsecs (kpc)
+        self.mass_scale = 1e11           # Mass unit in solar masses (Msun)
+        self.length_scale = 1              # Length unit in kiloparsecs (kpc)
 
         # Calculate the time unit (T0) in Myr
-        self.T0 = np.sqrt(self.R0**3 / (self.G_physical * self.M0))  # Time unit in Myr
+        self.time_scale = np.sqrt(self.length_scale**3 / (self.G_physical * self.mass_scale))  # Time unit in Myr
 
         # Calculate the velocity unit (V0) in kpc/Myr
-        self.V0 = self.R0 / self.T0  # Velocity unit in kpc/Myr
+        self.velocity_scale = self.length_scale / self.time_scale  # Velocity unit in kpc/Myr
 
         # Convert velocity unit to km/s (1 kpc/Myr = 977.8 km/s)
-        self.V0_kms = self.V0 * 977.8  # Velocity unit in km/s
+        self.velocity_scale_kms = self.velocity_scale * 977.8  # Velocity unit in km/s
 
-        # Log the scaling factors
-        logging.info(f"Physical units:")
-        logging.info(f"  Gravitational constant (G_physical): {self.G_physical} kpc^3 Msun^-1 Myr^-2")
-        logging.info(f"  Mass unit (M0): {self.M0} Msun")
-        logging.info(f"  Length unit (R0): {self.R0} kpc")
-        logging.info(f"  Time unit (T0): {self.T0:.3f} Myr")
-        logging.info(f"  Velocity unit (V0): {self.V0_kms:.3f} km/s")
+        if log:
+            # Log the scaling factors
+            logging.info(f"Physical units:")
+            logging.info(f"  Gravitational constant (G_physical): {self.G_physical} kpc^3 Msun^-1 Myr^-2")
+            logging.info(f"  Mass unit (M0): {self.mass_scale} Msun")
+            logging.info(f"  Length unit (R0): {self.length_scale} kpc")
+            logging.info(f"  Time unit (T0): {self.time_scale:.3f} Myr")
+            logging.info(f"  Velocity unit (V0): {self.velocity_scale_kms:.3f} km/s")
 
         # ------------------------------------------------------------
         # Simulation Units (Dimensionless Units)
@@ -61,21 +62,21 @@ class System:
 
         # Normalize constants for simulation
         self.G = 1.0        # Gravitational constant (normalized)
-        self.M = 1.0        # Mass (normalized)
-        self.a = 2.0        # Radial scale length (normalized to R0)
-        self.b = 0.1        # Vertical scale length (normalized)
+        # self.M = 1.0        # Mass (normalized)
+        # self.a = 2.0        # Radial scale length (normalized to R0)
+        # self.b = 0.1        # Vertical scale length (normalized)
 
-        # Scaling Factors for conversion between simulation units and physical units
-        self.length_scale = self.R0       # 1 simulation length unit = R0 kpc
-        self.mass_scale = self.M0         # 1 simulation mass unit = M0 Msun
-        self.time_scale = self.T0         # 1 simulation time unit = T0 Myr
-        self.velocity_scale = self.V0     # 1 simulation velocity unit = V0 kpc/Myr
-        self.velocity_scale_kms = self.V0_kms  # Velocity unit in km/s
+        # # Scaling Factors for conversion between simulation units and physical units
+        # self.length_scale = self.R0       # 1 simulation length unit = R0 kpc
+        # self.mass_scale = self.M0         # 1 simulation mass unit = M0 Msun
+        # self.time_scale = self.T0         # 1 simulation time unit = T0 Myr
+        # self.velocity_scale = self.V0     # 1 simulation velocity unit = V0 kpc/Myr
+        # self.velocity_scale_kms = self.V0_kms  # Velocity unit in km/s
 
-        # Log simulation scaling factors
-        logging.info(f"Simulation units (dimensionless):")
-        logging.info(f"  Gravitational constant (G): {self.G} (normalized)")
-        logging.info(f"  Mass (M): {self.M} (normalized)")
-        logging.info(f"  Radial scale length (a): {self.a} (dimensionless)")
-        logging.info(f"  Vertical scale length (b): {self.b} (dimensionless)")
+        # # Log simulation scaling factors
+        # logging.info(f"Simulation units (dimensionless):")
+        # logging.info(f"  Gravitational constant (G): {self.G} (normalized)")
+        # logging.info(f"  Mass (M): {self.M} (normalized)")
+        # logging.info(f"  Radial scale length (a): {self.a} (dimensionless)")
+        # logging.info(f"  Vertical scale length (b): {self.b} (dimensionless)")
 
