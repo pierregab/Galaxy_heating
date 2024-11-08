@@ -848,3 +848,91 @@ class Simulation(System):
             plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
             plt.close()
             logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+
+    def plot_rotation_curve(self):
+        """
+        Generate and save the galaxy rotation curve (speed) as a function of R with the velocity dispersion.
+        """
+        logging.info("Generating galaxy rotation curve plot.")
+
+        for integrator_name in self.integrators:
+            logging.info(f"Processing rotation curve for integrator: {integrator_name}")
+
+            # Define radial bins
+            R_min = 0.0
+            R_max = 15.0  # Adjust based on simulation data
+            num_bins = 50
+            R_bins = np.linspace(R_min, R_max, num_bins + 1)
+            R_centers = 0.5 * (R_bins[:-1] + R_bins[1:])
+
+            # Compute theoretical circular velocity at bin centers
+            v_c_theoretical = self.galaxy.circular_velocity(R_centers)
+
+            # From simulation data at the final time step
+            positions = self.positions[integrator_name][-1]  # [N, 3]
+            velocities = self.velocities[integrator_name][-1]  # [N, 3]
+
+            # Compute cylindrical coordinates
+            x = positions[:, 0]
+            y = positions[:, 1]
+            z = positions[:, 2]
+            R = np.sqrt(x**2 + y**2)
+            phi = np.arctan2(y, x)
+
+            # Compute velocities in cylindrical coordinates
+            v_x = velocities[:, 0]
+            v_y = velocities[:, 1]
+            v_z = velocities[:, 2]
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                v_R = (x * v_x + y * v_y) / R
+                v_phi = (x * v_y - y * v_x) / R
+
+            # Handle division by zero for R=0
+            v_R = np.nan_to_num(v_R)
+            v_phi = np.nan_to_num(v_phi)
+
+            # Bin the stars into radial bins
+            indices = np.digitize(R, R_bins)
+
+            # Initialize lists to store mean v_phi and dispersion
+            mean_v_phi = []
+            std_v_phi = []
+
+            for i in range(1, len(R_bins)):
+                idx = np.where(indices == i)[0]
+                if len(idx) > 0:
+                    v_phi_bin = v_phi[idx]
+                    mean_v_phi_bin = np.mean(v_phi_bin)
+                    std_v_phi_bin = np.std(v_phi_bin)
+                    mean_v_phi.append(mean_v_phi_bin)
+                    std_v_phi.append(std_v_phi_bin)
+                else:
+                    mean_v_phi.append(np.nan)
+                    std_v_phi.append(np.nan)
+
+            # Convert to arrays
+            mean_v_phi = np.array(mean_v_phi)
+            std_v_phi = np.array(std_v_phi)
+
+            # Convert units to km/s
+            R_centers_kpc = R_centers * self.length_scale  # in kpc
+            v_c_theoretical_kms = v_c_theoretical * self.velocity_scale_kms  # in km/s
+            mean_v_phi_kms = mean_v_phi * self.velocity_scale_kms  # in km/s
+            std_v_phi_kms = std_v_phi * self.velocity_scale_kms  # in km/s
+
+            # Plot
+            plt.figure(figsize=(10, 6))
+            plt.plot(R_centers_kpc, v_c_theoretical_kms, label='Theoretical Circular Velocity', color='blue', linewidth=2)
+            plt.errorbar(R_centers_kpc, mean_v_phi_kms, yerr=std_v_phi_kms, fmt='o', color='red',
+                         label='Mean $v_\\phi$ with Dispersion', capsize=3)
+            plt.xlabel('Radius $R$ (kpc)', fontsize=14)
+            plt.ylabel('Velocity (km/s)', fontsize=14)
+            plt.title(f'Galaxy Rotation Curve ({integrator_name})', fontsize=16)
+            plt.legend(fontsize=12)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            filename = f'rotation_curve_{integrator_name.lower()}.png'
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close()
+            logging.info(f"Rotation curve plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")

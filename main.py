@@ -36,8 +36,8 @@ def main():
 
     # Create Perturber instance
     M_BH = 0.1  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 10.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
+    initial_position_BH = np.array([0.0, 0.0, 4.0])  # Initial position [x, y, z]
+    initial_velocity_BH = 0*np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
@@ -49,7 +49,7 @@ def main():
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
+    t_max = T_orbit * 10  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy
@@ -73,6 +73,7 @@ def main():
     # Generate plots using the Simulation class methods
     simulation.plot_trajectories(subset=200)  # Plot a subset of 200 stars for clarity
     simulation.plot_galaxy_snapshots(n_snapshots=4)  # Plot 4 snapshots
+    simulation.plot_rotation_curve()
     simulation.plot_energy_error()
     simulation.plot_angular_momentum_error()
     simulation.plot_execution_time()

@@ -345,3 +345,11 @@ class Galaxy(System):
         self.initial_v_phi = v_phi.copy()
 
         logging.info(f"Initialization complete with {N} particles, each with mass {mass_per_star:.6e}.")
+
+    def circular_velocity(self, R):
+        """
+        Compute the circular velocity at radius R.
+        """
+        dPhi_dR = self.dPhidr(R)
+        v_c = np.sqrt(-R * dPhi_dR)
+        return v_c
