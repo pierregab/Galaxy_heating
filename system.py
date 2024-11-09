@@ -17,33 +17,8 @@ class System:
 
     def __init__(self, className:str, log:bool=False) -> None:
         # Logging simulation properties
-        logging.info(f"Initializing system {className} with the following properties:")
-
-        # ------------------------------------------------------------
-        # Physical Units (Astrophysical Units)
-        # ------------------------------------------------------------
-        # - Mass Unit (M0): 1 x 10^11 solar masses (Msun)
-        # - Length Unit (R0): 1 kiloparsecs (kpc)
-        # - Time Unit (T0): Derived from R0 and M0 using G
-        # - Velocity Unit (V0): Derived from R0 and T0
-
-        # Gravitational constant in physical units (kpc^3 Msun^-1 Myr^-2)
-        self.G_physical = 4.498e-12  # G = 4.498 x 10^-12 kpc^3 Msun^-1 Myr^-2
-
-        # Physical constants
-        self.mass_scale = 1e11           # Mass unit in solar masses (Msun)
-        self.length_scale = 1              # Length unit in kiloparsecs (kpc)
-
-        # Calculate the time unit (T0) in Myr
-        self.time_scale = np.sqrt(self.length_scale**3 / (self.G_physical * self.mass_scale))  # Time unit in Myr
-
-        # Calculate the velocity unit (V0) in kpc/Myr
-        self.velocity_scale = self.length_scale / self.time_scale  # Velocity unit in kpc/Myr
-
-        # Convert velocity unit to km/s (1 kpc/Myr = 977.8 km/s)
-        self.velocity_scale_kms = self.velocity_scale * 977.8  # Velocity unit in km/s
-
         if log:
+            logging.info(f"Initializing system {className} with the following properties:")
             # Log the scaling factors
             logging.info(f"Physical units:")
             logging.info(f"  Gravitational constant (G_physical): {self.G_physical} kpc^3 Msun^-1 Myr^-2")
@@ -51,32 +26,34 @@ class System:
             logging.info(f"  Length unit (R0): {self.length_scale} kpc")
             logging.info(f"  Time unit (T0): {self.time_scale:.3f} Myr")
             logging.info(f"  Velocity unit (V0): {self.velocity_scale_kms:.3f} km/s")
+        else:
+            logging.info(f"Initializing system {className}")
 
-        # ------------------------------------------------------------
-        # Simulation Units (Dimensionless Units)
-        # ------------------------------------------------------------
-        # - Gravitational Constant (G): Set to 1 for normalization
-        # - Mass (M): Set to 1 to normalize mass
-        # - Radial Scale Length (a): Set to 2.0 (dimensionless)
-        # - Vertical Scale Length (b): Set to 0.1 (dimensionless)
+    # ------------------------------------------------------------
+    #           Physical Units (Astrophysical Units)
+    # ------------------------------------------------------------
+    ## Scaling Factors for conversion between simulation units and physical units
+    # - Mass Unit (M0): 1 x 10^11 solar masses (Msun)
+    # - Length Unit (R0): 1 kiloparsecs (kpc)
+    # - Time Unit (T0): Derived from R0 and M0 using G
+    # - Velocity Unit (V0): Derived from R0 and T0
 
-        # Normalize constants for simulation
-        self.G = 1.0        # Gravitational constant (normalized)
-        # self.M = 1.0        # Mass (normalized)
-        # self.a = 2.0        # Radial scale length (normalized to R0)
-        # self.b = 0.1        # Vertical scale length (normalized)
+    G_physical = 4.498e-12                                            # G = 4.498 x 10^-12 (kpc^3 Msun^-1 Myr^-2)
+    mass_scale = 1e11                                                 # Mass unit in solar masses (Msun)
+    length_scale = 1                                                  # Length unit in kiloparsecs (kpc)
+    time_scale = np.sqrt(length_scale**3 / (G_physical * mass_scale)) # Time unit in Myr
+    velocity_scale = length_scale / time_scale                        # Velocity unit in kpc/Myr
+    velocity_scale_kms = velocity_scale * 977.8                       # Velocity unit in km/s (1 kpc/Myr = 977.8 km/s)
 
-        # # Scaling Factors for conversion between simulation units and physical units
-        # self.length_scale = self.R0       # 1 simulation length unit = R0 kpc
-        # self.mass_scale = self.M0         # 1 simulation mass unit = M0 Msun
-        # self.time_scale = self.T0         # 1 simulation time unit = T0 Myr
-        # self.velocity_scale = self.V0     # 1 simulation velocity unit = V0 kpc/Myr
-        # self.velocity_scale_kms = self.V0_kms  # Velocity unit in km/s
+    # ------------------------------------------------------------
+    #           Simulation Units (Dimensionless Units)
+    # ------------------------------------------------------------
+    # - Gravitational Constant (G): Set to 1 for normalization
+    # - Mass (M): Set to 1 to normalize mass
+    # - Radial Scale Length (a): Set to 2.0 (dimensionless)
+    # - Vertical Scale Length (b): Set to 0.1 (dimensionless)
 
-        # # Log simulation scaling factors
-        # logging.info(f"Simulation units (dimensionless):")
-        # logging.info(f"  Gravitational constant (G): {self.G} (normalized)")
-        # logging.info(f"  Mass (M): {self.M} (normalized)")
-        # logging.info(f"  Radial scale length (a): {self.a} (dimensionless)")
-        # logging.info(f"  Vertical scale length (b): {self.b} (dimensionless)")
-
+    G = 1.0                                                           # Gravitational constant (normalized to G_physical)
+    M = 1.0                                                           # Main mass              (normalized to mass_scale)
+    a = 2.0                                                           # Radial scale length    (normalized to length_scale)
+    b = 0.1                                                           # Vertical scale length  (normalized to length_scale)
