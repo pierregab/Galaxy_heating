@@ -1,8 +1,6 @@
-import os  # Import the os module for directory operations
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
-
 from galaxy import Galaxy
 from perturber import Perturber
 from simulation import Simulation
@@ -40,11 +38,9 @@ def main() -> None:
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
-    perturber2 = Perturber(mass=M_BH, position=-1*initial_position_BH, velocity=-1*initial_velocity_BH)
-    perturber3 = Perturber(mass=M_BH, position=-2*initial_position_BH, velocity=initial_velocity_BH)
 
     # Set the perturber in the galaxy
-    galaxy.set_perturbers(perturber1, perturber2, perturber3)
+    galaxy.set_perturbers(perturber1)#, perturber2, perturber3)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
@@ -74,7 +70,7 @@ def main() -> None:
 
     # Generate plots using the Simulation class methods
     simulation.plot_trajectories(subset=200)  # Plot a subset of 200 stars for clarity
-    simulation.plot_galaxy_snapshots(n_snapshots=4)  # Plot 4 snapshots
+    simulation.plot_galaxy_snapshots(n_snapshots=4, independantFig=True)  # Plot 4 snapshots independantly or not
     simulation.plot_rotation_curve()
     simulation.plot_energy_error()
     simulation.plot_angular_momentum_error()

@@ -1,8 +1,10 @@
+import ffmpeg.video
 from system import System
 from galaxy import Galaxy
 from integrators import Integrator
 import os  # Import the os module for directory operations
 import timeit
+import ffmpeg
 import logging
 import numpy as np
 from scipy.stats import norm
@@ -198,14 +200,14 @@ class Simulation(System):
                     plt.subplot(1, 2, 1)
                     plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
                             pos_BH[pertIndex, :, 1] * self.length_scale,
-                            color='red', linewidth=2, label=f'Perturber {pertIndex+1}')
+                            color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
                     plt.legend()
 
                     # x-z plot
                     plt.subplot(1, 2, 2)
                     plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
                             pos_BH[pertIndex, :, 2] * self.length_scale,
-                            color='red', linewidth=2, label=f'Perturber {pertIndex+1}')
+                            color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
                     plt.legend()
 
             plt.tight_layout()
@@ -751,7 +753,7 @@ class Simulation(System):
         plt.close()
         logging.info(f"Galaxy equipotential x-y and x-z plane plots saved to '{self.results_dir}/{filename}'.")
 
-    def plot_galaxy_snapshots(self, n_snapshots:int=4, figsize:tuple[float, float]|None=None) -> None:
+    def plot_galaxy_snapshots(self, n_snapshots:int=4, figsize:tuple[float, float]|None=None, independantFig:bool=False) -> None:
         if figsize is None:
             # Increase the figure size for better visibility
             figsize = (20, n_snapshots * 5)
@@ -805,7 +807,7 @@ class Simulation(System):
                             perturbers_pos_xy[1] * self.length_scale,
                             marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
                         )
-                        if i == 0:
+                        if i == 0 or independantFig:
                             ax_xy.legend(fontsize=10, loc='upper right')
 
                 ax_xy.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
@@ -834,7 +836,7 @@ class Simulation(System):
                             perturbers_pos_xz[2] * self.length_scale,
                             marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
                         )
-                        if i == 0:
+                        if i == 0 or independantFig:
                             ax_xz.legend(fontsize=10, loc='upper right')
 
                 ax_xz.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
@@ -845,10 +847,24 @@ class Simulation(System):
                 ax_xz.grid(True, linestyle='--', alpha=0.5)
                 ax_xz.set_aspect('equal')
 
-            filename = f'galaxy_snapshots_{integrator_name.lower()}.png'
-            plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
+                if independantFig:
+                    dir_path = os.path.join(self.results_dir, f'{integrator_name.lower()}_film_{n_snapshots}_snapshots/')
+                    if not os.path.exists(dir_path):
+                        os.mkdir(dir_path)
+                    filename = f'galaxy_snapshot_{i+1}.png'
+                    plt.savefig(os.path.join(dir_path, filename), bbox_inches='tight')
+                    logging.info(f"Snapshot {i+1}/{n_snapshots} saved.")
+                    fig.clear()
+            
+            if not independantFig:
+                filename = f'galaxy_snapshots_{integrator_name.lower()}.png'
+                plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
+                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+            else:
+                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{dir_path}/{filename}'.")
+                self.create_animation(dir_path)
+            
             plt.close()
-            logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
     def plot_rotation_curve(self):
         """
@@ -937,3 +953,16 @@ class Simulation(System):
             plt.savefig(os.path.join(self.results_dir, filename))
             plt.close()
             logging.info(f"Rotation curve plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+
+    def create_animation(self, path):
+        if not os.path.exists(path):
+            raise NameError(f"Path '{path}' is unknown. Please check the path.")
+        
+        frames_nb = len([fn for fn in os.listdir(path) if os.path.isfile(os.path.join(path,fn)) and str.endswith(fn, '.png')])
+        (
+            ffmpeg
+            .input(os.path.join(path,'*.png'), pattern_type='glob', framerate=25)
+            .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
+            .run()
+        )
+        logging.info(f"Animation_{frames_nb}_snapshots.mp4 ({0.041*frames_nb}s) saved in {path}.")
