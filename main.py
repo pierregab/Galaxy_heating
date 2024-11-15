@@ -40,10 +40,10 @@ def main() -> None:
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
-    #perturber2 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
+    perturber2 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
     # Set the perturber in the galaxy
-    galaxy.set_perturbers(perturber1)
+    galaxy.set_perturbers(perturber1, perturber2)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
