@@ -625,15 +625,20 @@ class Simulation(System):
         logging.info("Computing differences between RK4 and Leapfrog integrators.")
 
         # Check if both integrators were run
-        if 'RK4' not in self.integrators or 'Leapfrog' not in self.integrators:
+        required_integrators = ['RK4', 'Leapfrog']
+        if not all(impl in self.integrators for impl in required_integrators):
             logging.warning("Both RK4 and Leapfrog integrators must be selected to compute differences.")
             return
 
         # Retrieve positions and velocities from both integrators
-        positions_RK4 = self.positions['RK4']
-        velocities_RK4 = self.velocities['RK4']
-        positions_Leapfrog = self.positions['Leapfrog']
-        velocities_Leapfrog = self.velocities['Leapfrog']
+        try:
+            positions_RK4 = self.positions['RK4']            # Shape: [steps, N, 3]
+            velocities_RK4 = self.velocities['RK4']          # Shape: [steps, N, 3]
+            positions_Leapfrog = self.positions['Leapfrog']  # Shape: [steps, N, 3]
+            velocities_Leapfrog = self.velocities['Leapfrog']# Shape: [steps, N, 3]
+        except KeyError as e:
+            logging.error(f"Missing integrator data: {e}")
+            return
 
         # Ensure that both integrators have the same number of steps and particles
         if positions_RK4.shape != positions_Leapfrog.shape or velocities_RK4.shape != velocities_Leapfrog.shape:
@@ -641,47 +646,64 @@ class Simulation(System):
             return
 
         # Compute differences at the final time step for stars
-        final_positions_RK4 = positions_RK4[-1]  # Shape: [N, 3]
-        final_positions_Leapfrog = positions_Leapfrog[-1]
-        final_velocities_RK4 = velocities_RK4[-1]
-        final_velocities_Leapfrog = velocities_Leapfrog[-1]
+        final_positions_RK4 = positions_RK4[-1]          # Shape: [N, 3]
+        final_positions_Leapfrog = positions_Leapfrog[-1]# Shape: [N, 3]
+        final_velocities_RK4 = velocities_RK4[-1]        # Shape: [N, 3]
+        final_velocities_Leapfrog = velocities_Leapfrog[-1]  # Shape: [N, 3]
 
         # Compute position and velocity differences for stars
-        position_diff = final_positions_RK4 - final_positions_Leapfrog
-        velocity_diff = final_velocities_RK4 - final_velocities_Leapfrog
+        position_diff = final_positions_RK4 - final_positions_Leapfrog  # Shape: [N, 3]
+        velocity_diff = final_velocities_RK4 - final_velocities_Leapfrog  # Shape: [N, 3]
 
         # Compute RMS differences for stars
-        position_distance = np.sqrt(np.mean(np.sum(position_diff**2, axis=1)))
-        velocity_distance = np.sqrt(np.mean(np.sum(velocity_diff**2, axis=1)))
+        position_rms = np.sqrt(np.mean(np.sum(position_diff**2, axis=1)))
+        velocity_rms = np.sqrt(np.mean(np.sum(velocity_diff**2, axis=1)))
 
-        logging.info(f"Average position difference between RK4 and Leapfrog for stars: {position_distance:.6e} (dimensionless units)")
-        logging.info(f"Average velocity difference between RK4 and Leapfrog for stars: {velocity_distance:.6e} (dimensionless units)")
+        logging.info(f"Average RMS position difference between RK4 and Leapfrog for stars: {position_rms:.6e} (dimensionless units)")
+        logging.info(f"Average RMS velocity difference between RK4 and Leapfrog for stars: {velocity_rms:.6e} (dimensionless units)")
 
         # If perturbers data is available, compute differences for the perturbers
-        if 'RK4' in self.perturbers_positions and 'Leapfrog' in self.perturbers_positions:
-            positions_BH_RK4 = self.perturbers_positions['RK4']
-            velocities_BH_RK4 = self.perturbers_velocities['RK4']
-            positions_BH_Leapfrog = self.perturbers_positions['Leapfrog']
-            velocities_BH_Leapfrog = self.perturbers_velocities['Leapfrog']
+        if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers) > 0:
+            if 'RK4' in self.perturbers_positions and 'Leapfrog' in self.perturbers_positions:
+                positions_BH_RK4 = self.perturbers_positions['RK4']        # Shape: [P, steps, 3]
+                velocities_BH_RK4 = self.perturbers_velocities['RK4']      # Shape: [P, steps, 3]
+                positions_BH_Leapfrog = self.perturbers_positions['Leapfrog']  # Shape: [P, steps, 3]
+                velocities_BH_Leapfrog = self.perturbers_velocities['Leapfrog']# Shape: [P, steps, 3]
 
-            # Compute differences at the last time step for the perturbers
-            final_position_BH_RK4 = positions_BH_RK4[:,-1]
-            final_position_BH_Leapfrog = positions_BH_Leapfrog[:,-1]
-            final_velocity_BH_RK4 = velocities_BH_RK4[:,-1]
-            final_velocity_BH_Leapfrog = velocities_BH_Leapfrog[:,-1]
+                # Ensure the shapes match
+                if positions_BH_RK4.shape != positions_BH_Leapfrog.shape or velocities_BH_RK4.shape != velocities_BH_Leapfrog.shape:
+                    logging.error("Perturbers' integrator results have mismatched shapes. Cannot compute differences.")
+                    return
 
-            # Compute position and velocity differences for the perturbers
-            position_diff_BH = final_position_BH_RK4 - final_position_BH_Leapfrog
-            velocity_diff_BH = final_velocity_BH_RK4 - final_velocity_BH_Leapfrog
+                # Compute differences at the final time step for each perturber
+                final_positions_BH_RK4 = positions_BH_RK4[:, -1, :]        # Shape: [P, 3]
+                final_positions_BH_Leapfrog = positions_BH_Leapfrog[:, -1, :]  # Shape: [P, 3]
+                final_velocities_BH_RK4 = velocities_BH_RK4[:, -1, :]      # Shape: [P, 3]
+                final_velocities_BH_Leapfrog = velocities_BH_Leapfrog[:, -1, :]  # Shape: [P, 3]
 
-            # Compute Euclidean distances for the perturbers
-            position_distance_BH = np.sqrt(np.sum(position_diff_BH**2,axis=1))
-            velocity_distance_BH = np.sqrt(np.sum(velocity_diff_BH**2,axis=1))
+                # Compute position and velocity differences for perturbers
+                position_diff_BH = final_positions_BH_RK4 - final_positions_BH_Leapfrog  # Shape: [P, 3]
+                velocity_diff_BH = final_velocities_BH_RK4 - final_velocities_BH_Leapfrog  # Shape: [P, 3]
 
-            logging.info(f"Positions difference between RK4 and Leapfrog for perturbers: {position_distance_BH:.6e} (dimensionless units)")
-            logging.info(f"Velocities difference between RK4 and Leapfrog for perturbers: {velocity_distance_BH:.6e} (dimensionless units)")
+                # Compute Euclidean distances for the perturbers
+                position_distance_BH = np.linalg.norm(position_diff_BH, axis=1)  # Shape: [P]
+                velocity_distance_BH = np.linalg.norm(velocity_diff_BH, axis=1)  # Shape: [P]
+
+                # Compute RMS differences for perturbers
+                position_rms_BH = np.sqrt(np.mean(position_distance_BH**2))
+                velocity_rms_BH = np.sqrt(np.mean(velocity_distance_BH**2))
+
+                logging.info(f"Average RMS position difference between RK4 and Leapfrog for perturbers: {position_rms_BH:.6e} (dimensionless units)")
+                logging.info(f"Average RMS velocity difference between RK4 and Leapfrog for perturbers: {velocity_rms_BH:.6e} (dimensionless units)")
+
+                # Optional: Detailed per-perturber differences
+                for idx, pert in enumerate(self.galaxy.perturbers):
+                    logging.debug(f"Perturber {idx+1}: Position difference = {position_distance_BH[idx]:.6e}, Velocity difference = {velocity_distance_BH[idx]:.6e}")
+            else:
+                logging.warning("Perturber data is not available for both RK4 and Leapfrog integrators.")
         else:
-            logging.warning("Perturber data is not available for both integrators.")
+            logging.warning("No perturbers present in the simulation. Skipping perturber differences.")
+
 
     def plot_equipotential(self) -> None:
         """

@@ -1,6 +1,7 @@
 from system import System
 import numpy as np
 import logging
+
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -9,12 +10,12 @@ class Perturber(System):
     Perturber class representing a massive object (e.g., a black hole) that moves in the galaxy.
 
     Attributes:
-        mass (float): Mass of the perturber (normalized).
+        M (float): Mass of the perturber (normalized).
         position (np.ndarray): Position vector [x, y, z].
         velocity (np.ndarray): Velocity vector [vx, vy, vz].
     """
 
-    def __init__(self, mass:float, position:np.ndarray, velocity:np.ndarray) -> None:
+    def __init__(self, mass: float, position: np.ndarray, velocity: np.ndarray) -> None:
         super().__init__(self.__class__.__name__, M=mass)
         self.initial_position = self.position = np.copy(position)
         self.initial_velocity = self.velocity = np.copy(velocity)
@@ -23,31 +24,34 @@ class Perturber(System):
     def setHostGalaxy(self, hostGalaxy) -> "Perturber":
         self.galaxy = hostGalaxy
         return self
-    
-    def acceleration(self, pos:np.ndarray) -> np.ndarray:
+
+    def acceleration(self, pos_self: np.ndarray, perturbers_pos: np.ndarray, perturbers_mass: np.ndarray) -> np.ndarray:
         """
-        Compute the acceleration at a single position due to the galaxy's potential.
+        Compute the acceleration at the perturber's position due to the galaxy and other perturbers.
 
         Parameters:
-            pos : np.ndarray
-                Position array [3].
+            pos_self : np.ndarray
+                Position of this perturber [3].
+            perturbers_pos : np.ndarray
+                Positions of all perturbers [P, 3].
+            perturbers_mass : np.ndarray
+                Masses of all perturbers [P].
 
         Returns:
             np.ndarray
                 Acceleration vector [3].
         """
-        x = pos[0]
-        y = pos[1]
-        z = pos[2]
-        R = np.sqrt(x**2 + y**2)
-        galaxy = self.galaxy
-        z_term = np.sqrt(z**2 + galaxy.b**2)
-        denom = (R**2 + (galaxy.a + z_term)**2)**1.5
-        ax = -self.G * galaxy.M * x / denom
-        ay = -self.G * galaxy.M * y / denom
-        az = -self.G * galaxy.M * (galaxy.a + z_term) * z / (z_term * denom)
-        acc = np.array([ax, ay, az])
+        # Acceleration due to the galaxy
+        acc = self.galaxy.acceleration_single(pos_self)
 
+        # Acceleration due to other perturbers
+        for i, pos_other in enumerate(perturbers_pos):
+            if np.array_equal(pos_self, pos_other):
+                continue  # Skip self
+            delta = pos_other - pos_self
+            r = np.linalg.norm(delta)
+            if r > 0:
+                acc += self.G * perturbers_mass[i] * delta / r**3
         return acc
 
     def reset(self) -> "Perturber":

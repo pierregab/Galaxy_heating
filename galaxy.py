@@ -1,33 +1,29 @@
 from system import System
 from perturber import Perturber
 from particle import Particle
-import logging
 import numpy as np
+import logging
+
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 class Galaxy(System):
     """
     Galaxy class representing the galactic potential.
 
-    Methods:
-        set_mass(mass): Set the mass of the galaxy.
-        set_a(a): Set the radial scale length.
-        set_b(b): Set the vertical scale length.
-        potential(R, z): Compute the gravitational potential at (R, z).
-        acceleration(pos): Compute the acceleration at position pos.
-        initialize_stars(N, Rmax): Initialize N stars with positions drawn from the Schwarzschild distribution.
-        set_perturber(perturber): Set the perturber for the galaxy.
+    Attributes:
+        M (float): Mass of the galaxy.
+        a (float): Radial scale length.
+        b (float): Vertical scale length.
+        particles (list): List of star particles in the galaxy.
+        perturbers (list): List of perturber instances in the galaxy.
     """
 
-    def __init__(self, mass:float=1.0, a:float=2.0, b:float=None) -> None:
-        super().__init__(self.__class__.__name__, M=mass, log=True)
+    def __init__(self, mass: float = 1.0, a: float = 2.0, b: float = None) -> None:
+        super().__init__(self.__class__.__name__, M=mass)
         self.a = a           # Radial scale length (normalized to R0)
-        if b is None:
-            self.b = 1 / 20 * self.a  # Vertical scale length (normalized)
-        else:
-            self.b = b
+        self.b = 1 / 20 * self.a if b is None else b  # Vertical scale length (normalized)
+
         # Log galaxy parameters
         logging.info(f"Galaxy parameters:")
         logging.info(f"  Mass (M): {self.M} (normalized)")
@@ -39,7 +35,7 @@ class Galaxy(System):
         # Initialize list to hold Perturber instances
         self.perturbers = []
 
-    def potential(self, R:float|np.ndarray[float], z:float|np.ndarray[float]) -> float|np.ndarray[float]:
+    def potential(self, R: float | np.ndarray, z: float | np.ndarray) -> float | np.ndarray:
         """
         Compute the gravitational potential at a given (R, z).
 
@@ -55,8 +51,8 @@ class Galaxy(System):
         """
         denom = np.sqrt(R**2 + (self.a + np.sqrt(z**2 + self.b**2))**2)
         return -self.G * self.M / denom
-    
-    def set_perturbers(self, *perturbers:Perturber) -> "Galaxy":
+
+    def set_perturbers(self, *perturbers: Perturber) -> "Galaxy":
         """
         Set the perturbers for the galaxy.
 
@@ -66,21 +62,22 @@ class Galaxy(System):
         for pert in perturbers:
             pert.setHostGalaxy(self)
 
-        self.perturbers = perturbers
-        
-        logging.info(f"Perturbers : {self.perturbers}")
-        logging.info("Perturbers have been set in the galaxy.")
+        self.perturbers = list(perturbers)
+
+        logging.info(f"Perturbers have been set in the galaxy: {self.perturbers}")
         return self
 
-    def acceleration(self, pos:np.ndarray[float], perturbers_pos:np.ndarray[float]=None) -> np.ndarray[float]:
+    def acceleration(self, pos: np.ndarray, perturbers_pos: np.ndarray = None, perturbers_mass: np.ndarray = None) -> np.ndarray:
         """
-        Compute the acceleration vectors at given positions, including the effect of the perturber if present.
+        Compute the acceleration vectors at given positions, including the effect of the perturbers if present.
 
         Parameters:
             pos : np.ndarray
                 Array of positions [N, 3].
-            perturber_pos : np.ndarray
-                Position of the perturber [3], default is None.
+            perturbers_pos : np.ndarray
+                Positions of the perturbers [P, 3], default is None.
+            perturbers_mass : np.ndarray
+                Masses of the perturbers [P], default is None.
 
         Returns:
             np.ndarray
@@ -97,15 +94,38 @@ class Galaxy(System):
         az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
         acc = np.stack((ax, ay, az), axis=-1)
 
-        # Add acceleration due to perturber
-        if perturbers_pos is not None:
-            for pert in self.perturbers:
-                delta_r = perturbers_pos[self.perturbers.index(pert)] - pos       # [N, 3]
-                r = np.linalg.norm(delta_r, axis=1)  # [N]
+        # Add acceleration due to perturbers
+        if perturbers_pos is not None and perturbers_mass is not None:
+            for i, pos_pert in enumerate(perturbers_pos):
+                delta = pos_pert - pos       # [N, 3]
+                r = np.linalg.norm(delta, axis=1).reshape(-1, 1)  # [N, 1]
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    acc_pert = -self.G * pert.M * delta_r / r[:, None]**3
+                    acc_pert = self.G * perturbers_mass[i] * delta / r**3  # [N, 3]
                 acc_pert = np.nan_to_num(acc_pert)
-            acc += acc_pert
+                acc += acc_pert
+
+        return acc
+
+    def acceleration_single(self, pos: np.ndarray) -> np.ndarray:
+        """
+        Compute the acceleration at a single position due to the galaxy's potential.
+
+        Parameters:
+            pos : np.ndarray
+                Position vector [3].
+
+        Returns:
+            np.ndarray
+                Acceleration vector [3].
+        """
+        x, y, z = pos
+        R = np.sqrt(x**2 + y**2)
+        z_term = np.sqrt(z**2 + self.b**2)
+        denom = (R**2 + (self.a + z_term)**2)**1.5
+        ax = -self.G * self.M * x / denom
+        ay = -self.G * self.M * y / denom
+        az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
+        acc = np.array([ax, ay, az])
 
         return acc
 
