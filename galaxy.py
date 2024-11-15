@@ -22,14 +22,12 @@ class Galaxy(System):
     """
 
     def __init__(self, mass:float=1.0, a:float=2.0, b:float=None) -> None:
-        super().__init__(self.__class__.__name__, log=True)
-        self.M = mass        # Mass (normalized)
+        super().__init__(self.__class__.__name__, M=mass, log=True)
         self.a = a           # Radial scale length (normalized to R0)
         if b is None:
             self.b = 1 / 20 * self.a  # Vertical scale length (normalized)
         else:
             self.b = b
-
         # Log galaxy parameters
         logging.info(f"Galaxy parameters:")
         logging.info(f"  Mass (M): {self.M} (normalized)")
@@ -38,6 +36,8 @@ class Galaxy(System):
 
         # Initialize list to hold Particle instances
         self.particles = []
+        # Initialize list to hold Perturber instances
+        self.perturbers = []
 
     def potential(self, R:float|np.ndarray[float], z:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
@@ -56,19 +56,23 @@ class Galaxy(System):
         denom = np.sqrt(R**2 + (self.a + np.sqrt(z**2 + self.b**2))**2)
         return -self.G * self.M / denom
     
-    def set_perturber(self, perturber:Perturber) -> "Galaxy":
+    def set_perturbers(self, *perturbers:Perturber) -> "Galaxy":
         """
-        Set the perturber for the galaxy.
+        Set the perturbers for the galaxy.
 
         Parameters:
-            perturber (Perturber): The perturber object.
+            perturbers (Perturber): All perturber objects.
         """
-        self.perturber = perturber
-        perturber.setGalaxy(self)
-        logging.info("Perturber has been set in the galaxy.")
+        for pert in perturbers:
+            pert.setHostGalaxy(self)
+
+        self.perturbers = perturbers
+        
+        logging.info(f"Perturbers : {self.perturbers}")
+        logging.info("Perturbers have been set in the galaxy.")
         return self
 
-    def acceleration(self, pos:np.ndarray[float], perturber_pos=None) -> np.ndarray[float]:
+    def acceleration(self, pos:np.ndarray[float], perturbers_pos:np.ndarray[float]=None) -> np.ndarray[float]:
         """
         Compute the acceleration vectors at given positions, including the effect of the perturber if present.
 
@@ -94,11 +98,12 @@ class Galaxy(System):
         acc = np.stack((ax, ay, az), axis=-1)
 
         # Add acceleration due to perturber
-        if perturber_pos is not None:
-            delta_r = perturber_pos - pos  # [N, 3]
-            r = np.linalg.norm(delta_r, axis=1)  # [N]
-            with np.errstate(divide='ignore', invalid='ignore'):
-                acc_pert = -self.G * self.perturber.mass * delta_r / r[:, None]**3
+        if perturbers_pos is not None:
+            for pert in self.perturbers:
+                delta_r = perturbers_pos[self.perturbers.index(pert)] - pos       # [N, 3]
+                r = np.linalg.norm(delta_r, axis=1)  # [N]
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    acc_pert = -self.G * pert.M * delta_r / r[:, None]**3
                 acc_pert = np.nan_to_num(acc_pert)
             acc += acc_pert
 
@@ -157,7 +162,6 @@ class Galaxy(System):
         denom = R**2 + (a + b)**2
         Omega = self.omega(R)
         # Correct formula for kappa^2 in terms of potential derivatives
-        dPhidr = self.dPhidr(R)
         d2Phidr2 = (-self.G * self.M / (denom)**3) * (1 - 3 * R**2 / denom)
         kappa_squared = 4 * Omega**2 + R * d2Phidr2
         kappa_squared = np.maximum(kappa_squared, 0)  # Avoid negative values due to numerical errors
@@ -229,9 +233,6 @@ class Galaxy(System):
         # Epicyclic frequency kappa
         kappa = self.kappa(R)
         kappa_squared = kappa**2
-
-        # Gamma parameter
-        gamma = 2 * Omega / kappa
 
         # Corrected Radial velocity dispersion sigma_R
         sigma_R_squared = 2/3 * (alpha**2) * R_c**2 * kappa_squared

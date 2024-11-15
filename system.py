@@ -15,9 +15,10 @@ class System:
         - G (float): Gravitational constant in simulation units (normalized).
     '''
 
-    def __init__(self, className:str, log:bool=False) -> None:
-        # Logging simulation properties
+    def __init__(self, className:str, M:float=None, log:bool=False) -> None:
+        self.setM(M)                 # Mass (normalized)
         if log:
+            # Logging simulation properties
             logging.info(f"Initializing system {className} with the following properties:")
             # Log the scaling factors
             logging.info(f"Physical units:")
@@ -57,3 +58,9 @@ class System:
     M = 1.0                                                           # Main mass              (normalized to mass_scale)
     a = 2.0                                                           # Radial scale length    (normalized to length_scale)
     b = 0.1                                                           # Vertical scale length  (normalized to length_scale)
+
+    def setM(self, M_value:float) -> "System":
+        self.M = M_value
+        return self
+    
+    

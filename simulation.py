@@ -50,8 +50,8 @@ class Simulation(System):
         self.angular_momenta = {}
         self.execution_times = {}
         self.energies_BH = {}  # Dictionary to store perturber's energy for each integrator
-        self.perturber_positions = {}
-        self.perturber_velocities = {}
+        self.perturbers_positions = {}
+        self.perturbers_velocities = {}
 
         # Validate integrators
         valid_integrators = ['Leapfrog', 'RK4']
@@ -78,16 +78,17 @@ class Simulation(System):
 
     def reset_system(self) -> "Simulation":
         """
-        Reset all particles and the perturber to their initial conditions.
+        Reset all particles and the perturbers to their initial conditions.
         """
         logging.info("Resetting system to initial conditions.")
         # Reset all particles
         for particle in self.galaxy.particles:
             particle.reset()
         
-        # Reset the perturber if it exists
-        if hasattr(self.galaxy, 'perturber'):
-            self.galaxy.perturber.reset()
+        # Reset the perturbers if they exist
+        if hasattr(self.galaxy, 'perturbers'):
+            for pert in self.galaxy.perturbers:
+                pert.reset()
         return self
 
     def run(self) -> None:
@@ -120,8 +121,8 @@ class Simulation(System):
                 self.angular_momenta['Leapfrog'] = Lz
                 self.energies_BH['Leapfrog'] = energies_BH
                 if pos_BH is not None:
-                    self.perturber_positions['Leapfrog'] = pos_BH
-                    self.perturber_velocities['Leapfrog'] = vel_BH
+                    self.perturbers_positions['Leapfrog'] = pos_BH
+                    self.perturbers_velocities['Leapfrog'] = vel_BH
 
             elif integrator_name == 'RK4':
                 # RK4 Integration Timing
@@ -143,8 +144,8 @@ class Simulation(System):
                 self.angular_momenta['RK4'] = Lz
                 self.energies_BH['RK4'] = energies_BH
                 if pos_BH is not None:
-                    self.perturber_positions['RK4'] = pos_BH
-                    self.perturber_velocities['RK4'] = vel_BH
+                    self.perturbers_positions['RK4'] = pos_BH
+                    self.perturbers_velocities['RK4'] = vel_BH
 
         logging.info("Simulation completed.")
 
@@ -190,21 +191,22 @@ class Simulation(System):
             plt.axis('equal')
 
             # Plot the perturber's trajectory
-            if integrator_name in self.perturber_positions:
-                pos_BH = self.perturber_positions[integrator_name]  # [steps, 3]
-                # x-y plot
-                plt.subplot(1, 2, 1)
-                plt.plot(pos_BH[:, 0] * self.length_scale,
-                        pos_BH[:, 1] * self.length_scale,
-                        color='red', linewidth=2, label='Perturber')
-                plt.legend()
+            if integrator_name in self.perturbers_positions:
+                pos_BH = self.perturbers_positions[integrator_name]  # [P, steps, 3]
+                for pertIndex in range(pos_BH.shape[0]):
+                    # x-y plot
+                    plt.subplot(1, 2, 1)
+                    plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
+                            pos_BH[pertIndex, :, 1] * self.length_scale,
+                            color='red', linewidth=2, label=f'Perturber {pertIndex+1}')
+                    plt.legend()
 
-                # x-z plot
-                plt.subplot(1, 2, 2)
-                plt.plot(pos_BH[:, 0] * self.length_scale,
-                        pos_BH[:, 2] * self.length_scale,
-                        color='red', linewidth=2, label='Perturber')
-                plt.legend()
+                    # x-z plot
+                    plt.subplot(1, 2, 2)
+                    plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
+                            pos_BH[pertIndex, :, 2] * self.length_scale,
+                            color='red', linewidth=2, label=f'Perturber {pertIndex+1}')
+                    plt.legend()
 
             plt.tight_layout()
             filename = f'orbit_{integrator_name.lower()}.png'
@@ -222,7 +224,7 @@ class Simulation(System):
 
         for integrator_name in self.integrators:
             # Ensure that energy data for the integrator exists
-            if integrator_name not in self.energies or (hasattr(self.galaxy, 'perturber') and integrator_name not in self.energies_BH):
+            if integrator_name not in self.energies or (hasattr(self.galaxy, 'perturbers') and integrator_name not in self.energies_BH):
                 logging.warning(f"Energy data for integrator '{integrator_name}' is incomplete. Skipping.")
                 continue
 
@@ -235,14 +237,14 @@ class Simulation(System):
             # Sum stars' energies at each step to get total stars' energy
             total_E_stars = np.sum(E_stars, axis=1)  # [steps]
 
-            if hasattr(self.galaxy, 'perturber'):
-                # Perturber's energies: [steps]
-                E_BH = self.energies_BH[integrator_name]  # [steps]
+            if hasattr(self.galaxy, 'perturbers'):
+                # Perturbers' energies: [P, steps]
+                E_BH = self.energies_BH[integrator_name]  # [P, steps]
 
                 # System's total energy at each step
-                total_E_system = total_E_stars + E_BH  # [steps]
+                total_E_system = total_E_stars + np.add.reduce(E_BH, axis=0)  # [steps]
             else:
-                # If no perturber, system's total energy is stars' total energy
+                # If no perturbers, system's total energy is stars' total energy
                 total_E_system = total_E_stars  # [steps]
 
             # Initial total energy
@@ -616,7 +618,7 @@ class Simulation(System):
 
     def log_integrator_differences(self) -> None:
         """
-        Compute and log the differences between RK4 and Leapfrog integrators for stars and the perturber.
+        Compute and log the differences between RK4 and Leapfrog integrators for stars and the perturbers.
         """
         logging.info("Computing differences between RK4 and Leapfrog integrators.")
 
@@ -653,29 +655,29 @@ class Simulation(System):
         logging.info(f"Average position difference between RK4 and Leapfrog for stars: {position_distance:.6e} (dimensionless units)")
         logging.info(f"Average velocity difference between RK4 and Leapfrog for stars: {velocity_distance:.6e} (dimensionless units)")
 
-        # If perturber data is available, compute differences for the perturber
-        if 'RK4' in self.perturber_positions and 'Leapfrog' in self.perturber_positions:
-            positions_BH_RK4 = self.perturber_positions['RK4']
-            velocities_BH_RK4 = self.perturber_velocities['RK4']
-            positions_BH_Leapfrog = self.perturber_positions['Leapfrog']
-            velocities_BH_Leapfrog = self.perturber_velocities['Leapfrog']
+        # If perturbers data is available, compute differences for the perturbers
+        if 'RK4' in self.perturbers_positions and 'Leapfrog' in self.perturbers_positions:
+            positions_BH_RK4 = self.perturbers_positions['RK4']
+            velocities_BH_RK4 = self.perturbers_velocities['RK4']
+            positions_BH_Leapfrog = self.perturbers_positions['Leapfrog']
+            velocities_BH_Leapfrog = self.perturbers_velocities['Leapfrog']
 
-            # Compute differences at the last time step for the perturber
-            final_position_BH_RK4 = positions_BH_RK4[-1]
-            final_position_BH_Leapfrog = positions_BH_Leapfrog[-1]
-            final_velocity_BH_RK4 = velocities_BH_RK4[-1]
-            final_velocity_BH_Leapfrog = velocities_BH_Leapfrog[-1]
+            # Compute differences at the last time step for the perturbers
+            final_position_BH_RK4 = positions_BH_RK4[:,-1]
+            final_position_BH_Leapfrog = positions_BH_Leapfrog[:,-1]
+            final_velocity_BH_RK4 = velocities_BH_RK4[:,-1]
+            final_velocity_BH_Leapfrog = velocities_BH_Leapfrog[:,-1]
 
-            # Compute position and velocity differences for the perturber
+            # Compute position and velocity differences for the perturbers
             position_diff_BH = final_position_BH_RK4 - final_position_BH_Leapfrog
             velocity_diff_BH = final_velocity_BH_RK4 - final_velocity_BH_Leapfrog
 
-            # Compute Euclidean distances for the perturber
-            position_distance_BH = np.sqrt(np.sum(position_diff_BH**2))
-            velocity_distance_BH = np.sqrt(np.sum(velocity_diff_BH**2))
+            # Compute Euclidean distances for the perturbers
+            position_distance_BH = np.sqrt(np.sum(position_diff_BH**2,axis=1))
+            velocity_distance_BH = np.sqrt(np.sum(velocity_diff_BH**2,axis=1))
 
-            logging.info(f"Position difference between RK4 and Leapfrog for perturber: {position_distance_BH:.6e} (dimensionless units)")
-            logging.info(f"Velocity difference between RK4 and Leapfrog for perturber: {velocity_distance_BH:.6e} (dimensionless units)")
+            logging.info(f"Positions difference between RK4 and Leapfrog for perturbers: {position_distance_BH:.6e} (dimensionless units)")
+            logging.info(f"Velocities difference between RK4 and Leapfrog for perturbers: {velocity_distance_BH:.6e} (dimensionless units)")
         else:
             logging.warning("Perturber data is not available for both integrators.")
 
@@ -755,7 +757,7 @@ class Simulation(System):
             figsize = (20, n_snapshots * 5)
         """
         Generate and save black-and-white (grayscale) plots of the galaxy showing all stars
-        and the perturber (if present) at multiple time snapshots.
+        and the perturbers (if any) at multiple time snapshots.
         Each snapshot includes two subplots: x-y plane and x-z plane.
 
         Parameters:
@@ -794,16 +796,17 @@ class Simulation(System):
                     s=1, color='black', alpha=0.5
                 )
 
-                # Plot perturber if present
-                if integrator_name in self.perturber_positions:
-                    perturber_pos_xy = self.perturber_positions[integrator_name][step]
-                    ax_xy.plot(
-                        perturber_pos_xy[0] * self.length_scale,
-                        perturber_pos_xy[1] * self.length_scale,
-                        marker='*', markersize=12, color='red', label='Perturber'
-                    )
-                    if i == 0:
-                        ax_xy.legend(fontsize=10, loc='upper right')
+                # Plot perturbers if present
+                if integrator_name in self.perturbers_positions:
+                    for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
+                        perturbers_pos_xy = self.perturbers_positions[integrator_name][pertIndex,step]
+                        ax_xy.plot(
+                            perturbers_pos_xy[0] * self.length_scale,
+                            perturbers_pos_xy[1] * self.length_scale,
+                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
+                        )
+                        if i == 0:
+                            ax_xy.legend(fontsize=10, loc='upper right')
 
                 ax_xy.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
                 ax_xy.set_ylim(-15 * self.length_scale, 15 * self.length_scale)
@@ -823,15 +826,16 @@ class Simulation(System):
                 )
 
                 # Plot perturber if present
-                if integrator_name in self.perturber_positions:
-                    perturber_pos_xz = self.perturber_positions[integrator_name][step]
-                    ax_xz.plot(
-                        perturber_pos_xz[0] * self.length_scale,
-                        perturber_pos_xz[2] * self.length_scale,
-                        marker='*', markersize=12, color='red', label='Perturber'
-                    )
-                    if i == 0:
-                        ax_xz.legend(fontsize=10, loc='upper right')
+                if integrator_name in self.perturbers_positions:
+                    for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
+                        perturbers_pos_xz = self.perturbers_positions[integrator_name][pertIndex,step]
+                        ax_xz.plot(
+                            perturbers_pos_xz[0] * self.length_scale,
+                            perturbers_pos_xz[2] * self.length_scale,
+                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
+                        )
+                        if i == 0:
+                            ax_xz.legend(fontsize=10, loc='upper right')
 
                 ax_xz.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
                 ax_xz.set_ylim(-5 * self.length_scale, 5 * self.length_scale)

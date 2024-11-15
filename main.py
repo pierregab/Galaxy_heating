@@ -35,14 +35,16 @@ def main() -> None:
     galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
 
     # Create Perturber instance
-    M_BH = 0.1  # Mass of the perturber (normalized)
+    M_BH = 0.07  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
-    perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
+    perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
+    perturber2 = Perturber(mass=M_BH, position=-1*initial_position_BH, velocity=-1*initial_velocity_BH)
+    perturber3 = Perturber(mass=M_BH, position=-2*initial_position_BH, velocity=initial_velocity_BH)
 
     # Set the perturber in the galaxy
-    galaxy.set_perturber(perturber)
+    galaxy.set_perturbers(perturber1, perturber2, perturber3)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)

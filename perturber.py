@@ -15,18 +15,15 @@ class Perturber(System):
     """
 
     def __init__(self, mass:float, position:np.ndarray, velocity:np.ndarray) -> None:
-        super().__init__(self.__class__.__name__)
-        self.mass = mass
-        self.initial_position = np.copy(position)
-        self.initial_velocity = np.copy(velocity)
-        self.position = np.copy(position)
-        self.velocity = np.copy(velocity)
-        logging.info(f"Perturber initialized with mass {self.mass}, position {self.position}, and velocity {self.velocity}.")
+        super().__init__(self.__class__.__name__, M=mass)
+        self.initial_position = self.position = np.copy(position)
+        self.initial_velocity = self.velocity = np.copy(velocity)
+        logging.info(f"Perturber initialized with mass {self.M}, position {self.position}, and velocity {self.velocity}.")
 
-    def setGalaxy(self, galaxy) -> "Perturber":
-        self.galaxy = galaxy
+    def setHostGalaxy(self, hostGalaxy) -> "Perturber":
+        self.galaxy = hostGalaxy
         return self
-
+    
     def acceleration(self, pos:np.ndarray) -> np.ndarray:
         """
         Compute the acceleration at a single position due to the galaxy's potential.
