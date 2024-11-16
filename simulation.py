@@ -1,4 +1,3 @@
-import ffmpeg.video
 from system import System
 from galaxy import Galaxy
 from integrators import Integrator
@@ -776,9 +775,6 @@ class Simulation(System):
         logging.info(f"Galaxy equipotential x-y and x-z plane plots saved to '{self.results_dir}/{filename}'.")
 
     def plot_galaxy_snapshots(self, n_snapshots:int=4, figsize:tuple[float, float]|None=None, independantFig:bool=False) -> None:
-        if figsize is None:
-            # Increase the figure size for better visibility
-            figsize = (20, n_snapshots * 5)
         """
         Generate and save black-and-white (grayscale) plots of the galaxy showing all stars
         and the perturbers (if any) at multiple time snapshots.
@@ -789,6 +785,13 @@ class Simulation(System):
             figsize (tuple): Figure size in inches. Defaults to (20, n_snapshots * 5).
         """
         logging.info("Generating galaxy snapshots at multiple time steps.")
+
+        n_fig = n_snapshots
+        if independantFig:
+            n_fig = 1
+        if figsize is None:
+            # Increase the figure size for better visibility
+            figsize = (20,n_fig*5)
 
         # Define the snapshot steps (equally spaced)
         snapshot_steps = np.linspace(0, self.steps - 1, n_snapshots, dtype=int)
@@ -802,7 +805,7 @@ class Simulation(System):
             # Define GridSpec with 2 columns per snapshot row
             # Adjust 'wspace' and 'hspace' to control spacing between subplots
             # Adjust 'left', 'right', 'top', 'bottom' to control figure margins
-            gs = GridSpec(n_snapshots, 2, figure=fig, 
+            gs = GridSpec(n_fig, 2, figure=fig, 
                         wspace=-0.2,  # Horizontal space between subplots
                         hspace=0.3,  # Vertical space between rows
                         left=0.05, right=0.95, top=0.95, bottom=0.05)  # Margins
@@ -812,7 +815,7 @@ class Simulation(System):
                 current_time = self.times[step] * self.time_scale
 
                 # Plot for x-y plane
-                ax_xy = fig.add_subplot(gs[i, 0])
+                ax_xy = fig.add_subplot(gs[min(i,n_fig-1), 0])
                 star_positions_xy = self.positions[integrator_name][step]  # [N, 3]
                 ax_xy.scatter(
                     star_positions_xy[:, 0] * self.length_scale,
@@ -841,7 +844,7 @@ class Simulation(System):
                 ax_xy.set_aspect('equal')
 
                 # Plot for x-z plane
-                ax_xz = fig.add_subplot(gs[i, 1])
+                ax_xz = fig.add_subplot(gs[min(i,n_fig-1), 1])
                 star_positions_xz = self.positions[integrator_name][step]  # [N, 3]
                 ax_xz.scatter(
                     star_positions_xz[:, 0] * self.length_scale,
@@ -870,20 +873,20 @@ class Simulation(System):
                 ax_xz.set_aspect('equal')
 
                 if independantFig:
-                    dir_path = os.path.join(self.results_dir, f'{integrator_name.lower()}_film_{n_snapshots}_snapshots/')
+                    dir_path = os.path.join(self.results_dir, f'{integrator_name.lower()}_galaxy_{len(self.galaxy.perturbers)}_pert_{n_snapshots}_snapshots')
                     if not os.path.exists(dir_path):
                         os.mkdir(dir_path)
-                    filename = f'galaxy_snapshot_{i+1}.png'
-                    plt.savefig(os.path.join(dir_path, filename), bbox_inches='tight')
+                    filename = lambda i : f'{'0'*(len(str(n_snapshots)) - len(str(i)))+str(i)}.png'
+                    plt.savefig(os.path.join(dir_path, filename(i+1)), bbox_inches='tight')
                     logging.info(f"Snapshot {i+1}/{n_snapshots} saved.")
                     fig.clear()
             
             if not independantFig:
-                filename = f'galaxy_snapshots_{integrator_name.lower()}.png'
+                filename = f'galaxy_{len(self.galaxy.perturbers)}_pert_snapshots_{integrator_name.lower()}.png'
                 plt.savefig(os.path.join(self.results_dir, filename), bbox_inches='tight')
-                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{os.path.join(self.results_dir,filename)}'.")
             else:
-                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{dir_path}/{filename}'.")
+                logging.info(f"Galaxy snapshots for {integrator_name} saved to '{dir_path}'.")
                 self.create_animation(dir_path)
             
             plt.close()
