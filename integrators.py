@@ -63,7 +63,7 @@ class Integrator:
         masses = np.array([particle.mass for particle in particles])   # [N]
 
         # Compute initial accelerations
-        if pos_BH is not None:
+        if pos_BH:
             acc = galaxy.acceleration(pos, perturbers_pos=pos_BH, perturbers_mass=perturbers_mass)  # [N, 3]
             # Compute initial accelerations for perturbers
             acc_BH = np.array([
@@ -79,7 +79,7 @@ class Integrator:
 
         # Update velocities by half-step
         vel_half = vel + 0.5 * dt * acc  # [N, 3]
-        if vel_BH is not None:
+        if vel_BH:
             vel_BH_half = vel_BH + 0.5 * dt * acc_BH  # [P, 3]
 
         for i in range(steps):
@@ -87,7 +87,7 @@ class Integrator:
             pos += dt * vel_half  # [N, 3]
             positions[i] = pos
 
-            if pos_BH is not None:
+            if pos_BH:
                 pos_BH += dt * vel_BH_half  # [P, 3]
                 positions_BH[:, i] = pos_BH
 
@@ -96,7 +96,7 @@ class Integrator:
                     pert.position = pos_BH[index]
 
             # --- Compute new accelerations ---
-            if pos_BH is not None:
+            if pos_BH:
                 acc_new = galaxy.acceleration(pos, perturbers_pos=pos_BH, perturbers_mass=perturbers_mass)  # [N, 3]
                 acc_BH_new = np.array([
                     pert.acceleration(
@@ -114,7 +114,7 @@ class Integrator:
             vel_full = vel_half - 0.5 * dt * acc_new  # [N, 3]
             velocities[i] = vel_full
 
-            if vel_BH is not None:
+            if vel_BH:
                 vel_BH_half += dt * acc_BH_new  # [P, 3]
                 vel_BH_full = vel_BH_half - 0.5 * dt * acc_BH_new  # [P, 3]
                 velocities_BH[:, i] = vel_BH_full
@@ -134,7 +134,7 @@ class Integrator:
             potential_energy = galaxy.potential(R, z) * masses  # [N]
 
             # Potential Energy due to perturbers
-            if pos_BH is not None:
+            if pos_BH:
                 for j in range(len(perturbers)):
                     delta_r = pos_BH[j] - pos  # [N, 3]
                     r = np.linalg.norm(delta_r, axis=1)  # [N]
@@ -151,7 +151,7 @@ class Integrator:
             angular_momenta[i] = Lz * masses  # [N]
 
             # --- Compute Energies for Perturbers ---
-            if pos_BH is not None and energies_BH is not None:
+            if pos_BH and energies_BH:
                 for index, pert in enumerate(perturbers):
                     # Kinetic Energy of Perturber
                     KE_BH = 0.5 * pert.M * np.dot(vel_BH_full[index], vel_BH_full[index])
@@ -188,7 +188,6 @@ class Integrator:
             # --- Log progress every 10% ---
             if (i + 1) % max(1, steps // 10) == 0:
                 logging.info(f"Leapfrog integration progress: {100 * (i + 1) / steps:.1f}%")
-        print(energies)
         logging.info("Leapfrog integration completed.")
         return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
 
