@@ -38,7 +38,7 @@ class Integrator:
         angular_momenta = np.zeros((steps, N))
 
         # Check if perturbers are present
-        if hasattr(galaxy, 'perturbers') and len(galaxy.perturbers) > 0:
+        if hasattr(galaxy, 'perturbers') and len(galaxy.perturbers):
             P = len(galaxy.perturbers)
             energies_BH = np.zeros((P, steps))
             positions_BH = np.zeros((P, steps, 3))
@@ -188,7 +188,7 @@ class Integrator:
             # --- Log progress every 10% ---
             if (i + 1) % max(1, steps // 10) == 0:
                 logging.info(f"Leapfrog integration progress: {100 * (i + 1) / steps:.1f}%")
-
+        print(energies)
         logging.info("Leapfrog integration completed.")
         return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
 
