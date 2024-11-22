@@ -87,7 +87,7 @@ class Simulation(System):
             particle.reset()
         
         # Reset the perturbers if they exist
-        if hasattr(self.galaxy, 'perturbers'):
+        if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers):
             for pert in self.galaxy.perturbers:
                 pert.reset()
         return self
@@ -238,7 +238,7 @@ class Simulation(System):
             # Sum stars' energies at each step to get total stars' energy
             total_E_stars = np.sum(E_stars, axis=1)  # [steps]
 
-            if hasattr(self.galaxy, 'perturbers'):
+            if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers):
                 # Perturbers' energies: [P, steps]
                 E_BH = self.energies_BH[integrator_name]  # [P, steps]
 
