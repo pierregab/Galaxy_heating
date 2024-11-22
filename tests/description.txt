@@ -4,14 +4,15 @@
 
 
 
-o - Plot potential spatially colored
-o - Plot B&W isopotential
+v - Plot B&W isopotential
 v - One-star circular trajectory
 v - One-star circular max #periods before chaos
 o - One-star elliptic trajectory
 o - One-star "spring motion" trajectory
         (plot evolution of the maximum elongation as a function of time/periods)
 - One-star "spring motion" max #periods before chaos
+o - Relative drift of intregrator as a function of dt
+o - Organigramme des classes
 
 v - Plot energy conservation
 v - Plot momentum conservation
