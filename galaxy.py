@@ -61,8 +61,7 @@ class Galaxy(System):
         """
         for pert in perturbers:
             pert.setHostGalaxy(self)
-
-        self.perturbers = list(perturbers)
+            self.perturbers.append(pert)
 
         logging.info(f"Perturbers have been set in the galaxy: {self.perturbers}")
         return self
