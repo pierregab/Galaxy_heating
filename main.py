@@ -27,21 +27,21 @@ def main() -> None:
     logging.info("Starting the simulation with the following properties:")
 
     # Create Galaxy instance
-    galaxy = Galaxy(mass=1.0, a=2.0, b=0.1)
+    galaxy = Galaxy(mass=1.0, a=2.0, b=0.1, epsilon=0.1)
 
     # Initialize stars with the Schwarzschild velocity distribution
     galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
 
     # Create Perturber instance
-    M_BH = 2*0.07  # Mass of the perturber (normalized)
+    M_BH = 1*0.07  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
-    # perturber2 = Perturber(mass=M_BH, position=-0.7*initial_position_BH, velocity=-0.5*initial_velocity_BH)
+    perturber2 = Perturber(mass=M_BH, position=-0.7*initial_position_BH, velocity=-0.5*initial_velocity_BH)
 
     # Set the perturber in the galaxy
-    galaxy.set_perturbers(perturber1)#, perturber2)
+    galaxy.set_perturbers(perturber1)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
@@ -54,7 +54,7 @@ def main() -> None:
     dt = 0.1  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['Leapfrog']  # Modify this list to select integrators
+    selected_integrators = ['Leapfrog', 'Yoshida', 'RK4']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)

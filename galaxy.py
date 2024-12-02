@@ -15,20 +15,23 @@ class Galaxy(System):
         M (float): Mass of the galaxy.
         a (float): Radial scale length.
         b (float): Vertical scale length.
+        epsilon (float): Softening length for force smoothing.
         particles (list): List of star particles in the galaxy.
         perturbers (list): List of perturber instances in the galaxy.
     """
 
-    def __init__(self, mass: float = 1.0, a: float = 2.0, b: float = None) -> None:
+    def __init__(self, mass: float = 1.0, a: float = 2.0, b: float = None, epsilon: float = 0.01) -> None:
         super().__init__(self.__class__.__name__, M=mass)
         self.a = a           # Radial scale length (normalized to R0)
         self.b = 1 / 20 * self.a if b is None else b  # Vertical scale length (normalized)
+        self.epsilon = epsilon  # Softening length for force smoothing
 
         # Log galaxy parameters
         logging.info(f"Galaxy parameters:")
         logging.info(f"  Mass (M): {self.M} (normalized)")
         logging.info(f"  Radial scale length (a): {self.a} (dimensionless)")
         logging.info(f"  Vertical scale length (b): {self.b} (dimensionless)")
+        logging.info(f"  Softening length (epsilon): {self.epsilon} (dimensionless)")
 
         # Initialize list to hold Particle instances
         self.particles = []
@@ -93,13 +96,19 @@ class Galaxy(System):
         az = -self.G * self.M * (self.a + z_term) * z / (z_term * denom)
         acc = np.stack((ax, ay, az), axis=-1)
 
-        # Add acceleration due to perturbers
+        # Add acceleration due to perturbers with force smoothing
         if perturbers_pos is not None and perturbers_mass is not None:
             for i, pos_pert in enumerate(perturbers_pos):
                 delta = pos_pert - pos       # [N, 3]
-                r = np.linalg.norm(delta, axis=1).reshape(-1, 1)  # [N, 1]
+                r_squared = np.sum(delta**2, axis=1).reshape(-1, 1)  # [N, 1]
+
+                # Apply softening length epsilon
+                softening = self.epsilon
+                softened_r_squared = r_squared + softening**2
+                softened_r_cubed = softened_r_squared ** 1.5
+
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    acc_pert = self.G * perturbers_mass[i] * delta / r**3  # [N, 3]
+                    acc_pert = self.G * perturbers_mass[i] * delta / softened_r_cubed  # [N, 3]
                 acc_pert = np.nan_to_num(acc_pert)
                 acc += acc_pert
 
@@ -210,6 +219,7 @@ class Galaxy(System):
         numerator = a * R**2 + (a + 3 * D) * (a + D)**2
         rho = M * b**2 * numerator / (4 * np.pi * denom * D**3)
         return rho
+
 
     def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100) -> None:
         """

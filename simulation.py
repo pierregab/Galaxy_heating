@@ -36,7 +36,7 @@ class Simulation(System):
             galaxy (Galaxy): The galaxy instance.
             dt (float): Time step (dimensionless).
             t_max (float): Total simulation time (dimensionless).
-            integrators (list): List of integrators to run. Options: 'Leapfrog', 'RK4'.
+            integrators (list): List of integrators to run. Options: 'Leapfrog', 'RK4', 'Yoshida'.
         """
         super().__init__(self.__class__.__name__)
         self.galaxy = galaxy
@@ -55,7 +55,7 @@ class Simulation(System):
         self.perturbers_velocities = {}
 
         # Validate integrators
-        valid_integrators = ['Leapfrog', 'RK4']
+        valid_integrators = ['Leapfrog', 'RK4', 'Yoshida']  # Added 'Yoshida' to valid integrators
         for integrator in integrators:
             if integrator not in valid_integrators:
                 logging.error(f"Invalid integrator selected: {integrator}. Choose from {valid_integrators}.")
@@ -147,6 +147,33 @@ class Simulation(System):
                 if pos_BH is not None:
                     self.perturbers_positions['RK4'] = pos_BH
                     self.perturbers_velocities['RK4'] = vel_BH
+
+            elif integrator_name == 'Yoshida':
+                # Yoshida Integration Timing
+                def run_yoshida():
+                    return self.integrator.yoshida(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+
+                start_time = timeit.default_timer()
+                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH = run_yoshida()
+                total_time = timeit.default_timer() - start_time
+                average_time = total_time / self.steps
+                logging.info(f"Yoshida integration took {total_time:.3f} seconds in total.")
+                logging.info(f"Average time per step (Yoshida): {average_time*1e3:.6f} ms.")
+                self.execution_times['Yoshida'] = average_time * 1e3  # in ms
+
+                # Store results
+                self.positions['Yoshida'] = pos
+                self.velocities['Yoshida'] = vel
+                self.energies['Yoshida'] = energy
+                self.angular_momenta['Yoshida'] = Lz
+                self.energies_BH['Yoshida'] = energies_BH
+                if pos_BH is not None:
+                    self.perturbers_positions['Yoshida'] = pos_BH
+                    self.perturbers_velocities['Yoshida'] = vel_BH
+
+            else:
+                logging.error(f"Integrator '{integrator_name}' is not recognized.")
+                raise ValueError(f"Integrator '{integrator_name}' is not recognized.")
 
         logging.info("Simulation completed.")
 
@@ -244,6 +271,11 @@ class Simulation(System):
 
                 # System's total energy at each step
                 total_E_system = total_E_stars + np.add.reduce(E_BH, axis=0)  # [steps]
+                # Save np.add.reduce(E_BH, axis=0) to a file
+                np.save(os.path.join(self.results_dir, f'perturbers_energy_{integrator_name.lower()}.npy'), np.add.reduce(E_BH, axis=0))
+                # save total_E_stars to a file
+                np.save(os.path.join(self.results_dir, f'stars_energy_{integrator_name.lower()}.npy'), total_E_stars)
+
             else:
                 # If no perturbers, system's total energy is stars' total energy
                 total_E_system = total_E_stars  # [steps]
@@ -252,7 +284,7 @@ class Simulation(System):
             E_total_initial = total_E_system[0]  # Scalar
 
             # Compute relative energy error
-            relative_E_error = (total_E_system - E_total_initial) / np.abs(E_total_initial)  # [steps]
+            relative_E_error = np.abs(total_E_system - E_total_initial) / np.abs(E_total_initial)  # [steps]
 
             # Plot the relative energy error
             plt.plot(
@@ -298,6 +330,7 @@ class Simulation(System):
         plt.title('Angular Momentum Conservation Error Over Time', fontsize=16)
         plt.legend(fontsize=12)
         plt.grid(True)
+        plt.yscale('log')  # Using logarithmic scale to capture small errors
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, 'angular_momentum_error.png'))
         plt.close()
