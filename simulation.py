@@ -49,6 +49,7 @@ class Simulation(System):
         self.velocities = {}
         self.energies = {}
         self.angular_momenta = {}
+        self.angular_momenta_BH = {}
         self.execution_times = {}
         self.energies_BH = {}  # Dictionary to store perturber's energy for each integrator
         self.perturbers_positions = {}
@@ -108,7 +109,7 @@ class Simulation(System):
                     return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
 
                 start_time = timeit.default_timer()
-                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH = run_leapfrog()
+                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH = run_leapfrog()
                 total_time = timeit.default_timer() - start_time
                 average_time = total_time / self.steps
                 logging.info(f"Leapfrog integration took {total_time:.3f} seconds in total.")
@@ -121,6 +122,7 @@ class Simulation(System):
                 self.energies['Leapfrog'] = energy
                 self.angular_momenta['Leapfrog'] = Lz
                 self.energies_BH['Leapfrog'] = energies_BH
+                self.angular_momenta_BH['Leapfrog'] = Lz_BH
                 if pos_BH is not None:
                     self.perturbers_positions['Leapfrog'] = pos_BH
                     self.perturbers_velocities['Leapfrog'] = vel_BH
@@ -316,9 +318,15 @@ class Simulation(System):
             # Time array in physical units
             times_physical = self.times * self.time_scale  # Time in Myr
 
-            # Compute angular momentum errors
-            L0 = self.angular_momenta[integrator_name][0]  # [N]
-            L_error = (self.angular_momenta[integrator_name] - L0) / np.abs(L0)  # [steps, N]
+            if len(self.galaxy.perturbers):
+                print(self.angular_momenta_BH[integrator_name])
+                # Compute angular momentum errors
+                L0 = np.concatenate((self.angular_momenta[integrator_name][0], self.angular_momenta_BH[integrator_name][0]))  # [N+P]
+                L_error = (np.concatenate((self.angular_momenta[integrator_name],self.angular_momenta_BH[integrator_name]), axis=1) - L0) / np.abs(L0)  # [steps, N+P]
+            else:
+                # Compute angular momentum errors
+                L0 = self.angular_momenta[integrator_name][0] # [N+P]
+                L_error = (self.angular_momenta[integrator_name] - L0) / np.abs(L0)  # [steps, N+P]
 
             # Compute average angular momentum error across all stars
             avg_L_error = np.mean(np.abs(L_error), axis=1)  # [steps]
@@ -736,7 +744,6 @@ class Simulation(System):
         else:
             logging.warning("No perturbers present in the simulation. Skipping perturber differences.")
 
-
     def plot_equipotential(self) -> None:
         """
         Generate and save black-and-white (grayscale) equipotential line plots
@@ -863,7 +870,8 @@ class Simulation(System):
                         ax_xy.plot(
                             perturbers_pos_xy[0] * self.length_scale,
                             perturbers_pos_xy[1] * self.length_scale,
-                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
+                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12,
+                            color='red', label=f'Perturber {pertIndex+1}'
                         )
                         if i == 0 or independantFig:
                             ax_xy.legend(fontsize=10, loc='upper right')

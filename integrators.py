@@ -47,13 +47,15 @@ class Integrator:
 
             # Initialize perturbers' positions, velocities, masses
             perturbers = galaxy.perturbers
-            pos_BH = np.array([pert.position for pert in perturbers])  # [P, 3]
-            vel_BH = np.array([pert.velocity for pert in perturbers])  # [P, 3]
-            perturbers_mass = np.array([pert.M for pert in perturbers])  # [P]
+            pos_BH = np.array([pert.position for pert in perturbers])   # [P, 3]
+            vel_BH = np.array([pert.velocity for pert in perturbers])   # [P, 3]
+            perturbers_mass = np.array([pert.M for pert in perturbers]) # [P]
+            angular_momenta_BH = np.zeros((steps, len(perturbers)))     # [N, P]
         else:
             energies_BH = None
             positions_BH = None
             velocities_BH = None
+            angular_momenta_BH = None
             pos_BH = None
             vel_BH = None
             perturbers_mass = None
@@ -165,6 +167,11 @@ class Integrator:
             Lz = pos[:, 0] * vel_full[:, 1] - pos[:, 1] * vel_full[:, 0]  # [N]
             angular_momenta[step] = Lz * masses  # [N]
 
+            # Angular Momentum for perturbers
+            if pos_BH is not None:
+                Lz_BH = pos_BH[:, 0] * vel_BH_full[:, 1] - pos_BH[:, 1] * vel_BH_full[:, 0]  # [P]
+                angular_momenta_BH[i] = Lz_BH * np.array([pert.M for pert in perturbers])
+
             # --- Compute Energies for Perturbers ---
             if pos_BH is not None and energies_BH is not None:
                 for index, pert in enumerate(perturbers):
@@ -196,7 +203,7 @@ class Integrator:
             if (step + 1) % max(1, steps // 10) == 0:
                 logging.info(f"Leapfrog integration progress: {100 * (step + 1) / steps:.1f}%")
         logging.info("Leapfrog integration completed.")
-        return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
+        return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH, angular_momenta_BH
     
 
     def rk4(self, particles: list, galaxy: Galaxy, dt: float, steps: int) -> tuple:
@@ -658,5 +665,5 @@ class Integrator:
                 logging.info(f"Yoshida integration progress: {100 * (i + 1) / steps:.1f}%")
 
         logging.info("Yoshida integration completed.")
-        return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH
+        return positions, velocities, energies, angular_momenta, energies_BH, positions_BH, velocities_BH, angular_momenta_BH
 
