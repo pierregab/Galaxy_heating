@@ -9,6 +9,10 @@ import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from copy import deepcopy
+from functools import partial
+import time
 
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,7 +32,7 @@ class Simulation(System):
         log_integrator_differences(): Compute and log differences between integrators.
     """
 
-    def __init__(self, galaxy:Galaxy, dt:float=0.05, t_max:float=250.0, integrators:list[str]=['Leapfrog', 'RK4']) -> None:
+    def __init__(self, galaxy:Galaxy, dt:float=0.05, t_max:float=250.0, integrators:list[str]=['Leapfrog', 'RK4', 'Yoshida'], paralellised = True) -> None:
         """
         Initialize the Simulation.
 
@@ -39,6 +43,7 @@ class Simulation(System):
             integrators (list): List of integrators to run. Options: 'Leapfrog', 'RK4', 'Yoshida'.
         """
         super().__init__(self.__class__.__name__)
+        self.paralellised = paralellised
         self.galaxy = galaxy
         self.dt = dt
         self.t_max = t_max
@@ -97,100 +102,86 @@ class Simulation(System):
 
     def run(self) -> None:
         """
-        Run the simulation using the selected integrators.
+        Run the simulation using the selected integrators in parallel.
         """
-        logging.info("Starting the simulation.")
+        logging.info("Starting the simulation with parallel integrator execution.")
 
+        paralellised = self.paralellised
+
+        # Prepare a list to hold the deep copies for each integrator
+        integrator_tasks = []
         for integrator_name in self.integrators:
             # Reset the system before each integrator run
             self.reset_system()
+            # Deep copy the galaxy to ensure each integrator works with the same initial conditions
+            galaxy_copy = deepcopy(self.galaxy)
+            integrator_tasks.append((integrator_name, galaxy_copy, self.dt, self.steps))
 
-            if integrator_name == 'Leapfrog':
-                # Leapfrog Integration Timing
-                def run_leapfrog():
-                    return self.integrator.leapfrog(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+        # Use ProcessPoolExecutor to run integrators in parallel and if parallelised is False, run them sequentially
+        if paralellised:
+            with ProcessPoolExecutor(max_workers=len(self.integrators)) as executor:
+                # Submit all integrator tasks
+                futures = [
+                    executor.submit(run_single_integrator, integrator_name, galaxy_copy, dt, steps)
+                    for (integrator_name, galaxy_copy, dt, steps) in integrator_tasks
+                ]
 
-                start_time = timeit.default_timer()
-                # Unpack all 10 return values
-                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH, total_energy, energy_error = run_leapfrog()
-                total_time = timeit.default_timer() - start_time
-                average_time = total_time / self.steps
-                logging.info(f"Leapfrog integration took {total_time:.3f} seconds in total.")
-                logging.info(f"Average time per step (Leapfrog): {average_time*1e3:.6f} ms.")
-                self.execution_times['Leapfrog'] = average_time * 1e3  # in ms
+                # As each future completes, collect the results
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        integrator_name = result['integrator_name']
 
-                # Store results
-                self.positions['Leapfrog'] = pos
-                self.velocities['Leapfrog'] = vel
-                self.energies['Leapfrog'] = energy
-                self.angular_momenta['Leapfrog'] = Lz
-                self.energies_BH['Leapfrog'] = energies_BH
-                self.angular_momenta_BH['Leapfrog'] = Lz_BH
-                self.total_energy['Leapfrog'] = total_energy
-                self.energy_error['Leapfrog'] = energy_error
-                if pos_BH is not None:
-                    self.perturbers_positions['Leapfrog'] = pos_BH
-                    self.perturbers_velocities['Leapfrog'] = vel_BH
+                        # Store the execution time if available
+                        if 'execution_time' in result:
+                            self.execution_times[integrator_name] = result['execution_time'] * 1e3  # Convert to milliseconds
 
-            elif integrator_name == 'RK4':
-                # RK4 Integration Timing
-                def run_rk4():
-                    return self.integrator.rk4(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+                        # Store the results
+                        self.positions[integrator_name] = result['positions']
+                        self.velocities[integrator_name] = result['velocities']
+                        self.energies[integrator_name] = result['energies']
+                        self.angular_momenta[integrator_name] = result['angular_momenta']
+                        self.energies_BH[integrator_name] = result['energies_BH']
+                        self.angular_momenta_BH[integrator_name] = result['angular_momenta_BH']
+                        self.total_energy[integrator_name] = result['total_energy']
+                        self.energy_error[integrator_name] = result['energy_error']
+                        self.perturbers_positions[integrator_name] = result['positions_BH']
+                        self.perturbers_velocities[integrator_name] = result['velocities_BH']
 
-                start_time = timeit.default_timer()
-                # Assuming RK4 still returns 8 values
-                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH = run_rk4()
-                total_time = timeit.default_timer() - start_time
-                average_time = total_time / self.steps
-                logging.info(f"RK4 integration took {total_time:.3f} seconds in total.")
-                logging.info(f"Average time per step (RK4): {average_time*1e3:.6f} ms.")
-                self.execution_times['RK4'] = average_time * 1e3  # in ms
+                        logging.info(f"Integrator '{integrator_name}' completed successfully.")
 
-                # Store results
-                self.positions['RK4'] = pos
-                self.velocities['RK4'] = vel
-                self.energies['RK4'] = energy
-                self.angular_momenta['RK4'] = Lz
-                self.energies_BH['RK4'] = energies_BH
-                self.angular_momenta_BH['RK4'] = Lz_BH
-                self.total_energy['RK4'] = None  # Placeholder if not computed
-                self.energy_error['RK4'] = None    # Placeholder if not computed
-                if pos_BH is not None:
-                    self.perturbers_positions['RK4'] = pos_BH
-                    self.perturbers_velocities['RK4'] = vel_BH
+                    except Exception as e:
+                        logging.error(f"Integrator run failed: {e}")
 
-            elif integrator_name == 'Yoshida':
-                # Yoshida Integration Timing
-                def run_yoshida():
-                    return self.integrator.yoshida(self.galaxy.particles, self.galaxy, self.dt, self.steps)
+        else:
+            try:
+                for integrator_name, galaxy_copy, dt, steps in integrator_tasks:
+                    result = run_single_integrator(integrator_name, galaxy_copy, dt, steps)
+                    integrator_name = result['integrator_name']
 
-                start_time = timeit.default_timer()
-                # Assuming Yoshida still returns 8 values
-                pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH = run_yoshida()
-                total_time = timeit.default_timer() - start_time
-                average_time = total_time / self.steps
-                logging.info(f"Yoshida integration took {total_time:.3f} seconds in total.")
-                logging.info(f"Average time per step (Yoshida): {average_time*1e3:.6f} ms.")
-                self.execution_times['Yoshida'] = average_time * 1e3  # in ms
+                    # Store the execution time if available
+                    if 'execution_time' in result:
+                        self.execution_times[integrator_name] = result['execution_time'] * 1e3
 
-                # Store results
-                self.positions['Yoshida'] = pos
-                self.velocities['Yoshida'] = vel
-                self.energies['Yoshida'] = energy
-                self.angular_momenta['Yoshida'] = Lz
-                self.energies_BH['Yoshida'] = energies_BH
-                self.angular_momenta_BH['Yoshida'] = Lz_BH
-                self.total_energy['Yoshida'] = None  # Placeholder if not computed
-                self.energy_error['Yoshida'] = None    # Placeholder if not computed
-                if pos_BH is not None:
-                    self.perturbers_positions['Yoshida'] = pos_BH
-                    self.perturbers_velocities['Yoshida'] = vel_BH
+                    # Store the results
+                    self.positions[integrator_name] = result['positions']
+                    self.velocities[integrator_name] = result['velocities']
+                    self.energies[integrator_name] = result['energies']
+                    self.angular_momenta[integrator_name] = result['angular_momenta']
+                    self.energies_BH[integrator_name] = result['energies_BH']
+                    self.angular_momenta_BH[integrator_name] = result['angular_momenta_BH']
+                    self.total_energy[integrator_name] = result['total_energy']
+                    self.energy_error[integrator_name] = result['energy_error']
+                    self.perturbers_positions[integrator_name] = result['positions_BH']
+                    self.perturbers_velocities[integrator_name] = result['velocities_BH']
 
-            else:
-                logging.error(f"Integrator '{integrator_name}' is not recognized.")
-                raise ValueError(f"Integrator '{integrator_name}' is not recognized.")
+                    logging.info(f"Integrator '{integrator_name}' completed successfully.")
 
-        logging.info("Simulation completed.")
+            except Exception as e:
+                logging.error(f"Integrator run failed: {e}")
+
+        logging.info("All integrators have been executed in parallel.")
+
 
     def plot_trajectories(self, subset:int=100) -> None:
         """
@@ -301,42 +292,79 @@ class Simulation(System):
         plt.close()
         logging.info(f"Total energy conservation error plot saved to '{self.results_dir}/total_energy_error.png'.")
 
+
     def plot_angular_momentum_error(self) -> None:
         """
-        Plot the angular momentum conservation error over time.
+        Plot the angular momentum conservation error over time, including a dedicated subplot for Lz.
         """
         logging.info("Generating angular momentum conservation error plot.")
+        
+        plt.figure(figsize=(14, 15))  # Increased height to accommodate an extra subplot
 
-        plt.figure(figsize=(12, 8))
         for integrator_name in self.integrators:
-            # Time array in physical units
-            times_physical = self.times * self.time_scale  # Time in Myr
+            # Time array in physical units (e.g., Myr)
+            times_physical = self.times * self.time_scale  # Assuming self.times is in simulation units
 
             if len(self.galaxy.perturbers):
-                print(self.angular_momenta_BH[integrator_name])
-                # Compute angular momentum errors
-                L0 = np.concatenate((self.angular_momenta[integrator_name][0], self.angular_momenta_BH[integrator_name][0]))  # [N+P]
-                L_error = (np.concatenate((self.angular_momenta[integrator_name],self.angular_momenta_BH[integrator_name]), axis=1) - L0) / np.abs(L0)  # [steps, N+P]
+                # Total angular momentum for stars and perturbers
+                L_stars = np.sum(self.angular_momenta[integrator_name], axis=1)  # [steps, 3]
+                L_BH = np.sum(self.angular_momenta_BH[integrator_name], axis=1) if self.angular_momenta_BH[integrator_name] is not None else 0
+                L_total = L_stars + L_BH  # [steps, 3]
+                L0_total = L_total[0]
             else:
-                # Compute angular momentum errors
-                L0 = self.angular_momenta[integrator_name][0] # [N+P]
-                L_error = (self.angular_momenta[integrator_name] - L0) / np.abs(L0)  # [steps, N+P]
+                # Total angular momentum for stars only
+                L_total = np.sum(self.angular_momenta[integrator_name], axis=1)  # [steps, 3]
+                L0_total = L_total[0]
 
-            # Compute average angular momentum error across all stars
-            avg_L_error = np.mean(np.abs(L_error), axis=1)  # [steps]
+            # Compute the magnitude of total angular momentum at each step
+            L_magnitude = np.linalg.norm(L_total, axis=1)  # [steps]
+            L0_magnitude = np.linalg.norm(L0_total)
 
-            plt.plot(times_physical, avg_L_error, label=integrator_name, linewidth=1)
+            # Compute relative error in magnitude
+            relative_error_magnitude = np.abs(L_magnitude - L0_magnitude) / np.abs(L0_magnitude)  # [steps]
 
-        plt.xlabel('Time (Myr)', fontsize=14)
-        plt.ylabel('Relative Angular Momentum Error', fontsize=14)
-        plt.title('Angular Momentum Conservation Error Over Time', fontsize=16)
-        plt.legend(fontsize=12)
-        plt.grid(True)
-        plt.yscale('log')  # Using logarithmic scale to capture small errors
+            # Compute relative error for each component
+            relative_error_components = np.abs(L_total - L0_total) / np.abs(L0_total)  # [steps, 3]
+            relative_error_x = relative_error_components[:, 0]
+            relative_error_y = relative_error_components[:, 1]
+            relative_error_z = relative_error_components[:, 2]
+
+            # Plot Relative Error in Total Angular Momentum Magnitude
+            plt.subplot(3, 1, 1)  # Changed from (2,1,1) to (3,1,1)
+            plt.plot(times_physical, relative_error_magnitude, label=integrator_name, linewidth=1)
+            plt.xlabel('Time (Myr)', fontsize=14)
+            plt.ylabel('Relative Error in |L|', fontsize=14)
+            plt.title('Total Angular Momentum Conservation Error', fontsize=16)
+            plt.yscale('log')
+            plt.grid(True)
+
+            # Plot Relative Error in Each Angular Momentum Component
+            plt.subplot(3, 1, 2)  # Changed from (2,1,2) to (3,1,2)
+            plt.plot(times_physical, relative_error_x, label=f'{integrator_name} Lx', linewidth=1)
+            plt.plot(times_physical, relative_error_y, label=f'{integrator_name} Ly', linewidth=1)
+            plt.plot(times_physical, relative_error_z, label=f'{integrator_name} Lz', linewidth=1)
+            plt.xlabel('Time (Myr)', fontsize=14)
+            plt.ylabel('Relative Error in L Components', fontsize=14)
+            plt.title('Angular Momentum Conservation Error per Component', fontsize=16)
+            plt.yscale('log')
+            plt.legend(fontsize=12)
+            plt.grid(True)
+
+            # Add a Dedicated Subplot for Lz
+            plt.subplot(3, 1, 3)
+            plt.plot(times_physical, relative_error_z, label=f'{integrator_name} Lz', linewidth=1)
+            plt.xlabel('Time (Myr)', fontsize=14)
+            plt.ylabel('Relative Error in Lz', fontsize=14)
+            plt.title('Angular Momentum Conservation Error for Lz Component', fontsize=16)
+            plt.yscale('log')
+            plt.legend(fontsize=12)
+            plt.grid(True)
+
         plt.tight_layout()
         plt.savefig(os.path.join(self.results_dir, 'angular_momentum_error.png'))
         plt.close()
         logging.info(f"Angular momentum conservation error plot saved to '{self.results_dir}/angular_momentum_error.png'.")
+
 
     def plot_execution_time(self) -> None:
         """
@@ -1026,3 +1054,50 @@ class Simulation(System):
             .run()
         )
         logging.info(f"Animation_{frames_nb}_snapshots.mp4 ({0.041*frames_nb}s) saved in {path}.")
+
+
+def run_single_integrator(integrator_name, galaxy, dt, steps):
+    """
+    Run a single integrator and return the results.
+
+    Parameters:
+        integrator_name (str): Name of the integrator ('Leapfrog', 'RK4', 'Yoshida').
+        galaxy (Galaxy): A deep copy of the Galaxy instance.
+        dt (float): Time step.
+        steps (int): Number of integration steps.
+
+    Returns:
+        dict: A dictionary containing the results of the integration.
+    """
+    integrator = Integrator()
+    simulation_results = {}
+
+    if integrator_name == 'Leapfrog':
+        pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH, total_energy, energy_error = integrator.leapfrog(
+            galaxy.particles, galaxy, dt, steps
+        )
+    elif integrator_name == 'RK4':
+        pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH, total_energy, energy_error = integrator.rk4(
+            galaxy.particles, galaxy, dt, steps
+        )
+    elif integrator_name == 'Yoshida':
+        pos, vel, energy, Lz, energies_BH, pos_BH, vel_BH, Lz_BH, total_energy, energy_error = integrator.yoshida(
+            galaxy.particles, galaxy, dt, steps
+        )
+    else:
+        raise ValueError(f"Unknown integrator: {integrator_name}")
+
+    # Store the results in a dictionary
+    simulation_results['integrator_name'] = integrator_name
+    simulation_results['positions'] = pos
+    simulation_results['velocities'] = vel
+    simulation_results['energies'] = energy
+    simulation_results['angular_momenta'] = Lz
+    simulation_results['energies_BH'] = energies_BH
+    simulation_results['angular_momenta_BH'] = Lz_BH
+    simulation_results['total_energy'] = total_energy
+    simulation_results['energy_error'] = energy_error
+    simulation_results['positions_BH'] = pos_BH
+    simulation_results['velocities_BH'] = vel_BH
+
+    return simulation_results
