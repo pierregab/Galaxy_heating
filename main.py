@@ -33,7 +33,7 @@ def main() -> None:
     galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
 
     # Create Perturber instance
-    M_BH = 1*0.07  # Mass of the perturber (normalized)
+    M_BH = 0*0.07  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
@@ -54,7 +54,7 @@ def main() -> None:
     dt = 0.1  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['Leapfrog', 'Yoshida', 'RK4']  # Modify this list to select integrators
+    selected_integrators = ['Leapfrog']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators)
