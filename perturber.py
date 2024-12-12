@@ -2,7 +2,7 @@ from system import System
 import numpy as np
 import logging
 
-# Set up professional logging
+# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Perturber(System):

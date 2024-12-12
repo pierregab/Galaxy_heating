@@ -4,7 +4,7 @@ from galaxy import Galaxy
 import logging
 import numpy as np
 
-# Set up professional logging
+# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 

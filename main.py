@@ -57,7 +57,7 @@ def main() -> None:
     selected_integrators = ['Leapfrog', 'RK4', 'Yoshida']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
-    simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators, paralellised=False)
+    simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators, paralellised=True)
 
     # Plot the galaxy potential before running the simulation
     simulation.plot_equipotential()

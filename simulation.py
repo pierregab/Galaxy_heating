@@ -14,7 +14,7 @@ from copy import deepcopy
 from functools import partial
 import time
 
-# Set up professional logging
+# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Simulation(System):
