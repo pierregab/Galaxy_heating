@@ -2,7 +2,6 @@ from system import System
 from galaxy import Galaxy
 from integrators import Integrator
 import os  # Import the os module for directory operations
-import timeit
 import ffmpeg
 import logging
 import numpy as np
@@ -11,8 +10,6 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
-from functools import partial
-import time
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -226,21 +223,23 @@ class Simulation(System):
 
             # Plot the perturber's trajectory
             if integrator_name in self.perturbers_positions:
-                pos_BH = self.perturbers_positions[integrator_name]  # [P, steps, 3]
-                for pertIndex in range(pos_BH.shape[0]):
-                    # x-y plot
-                    plt.subplot(1, 2, 1)
-                    plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
-                            pos_BH[pertIndex, :, 1] * self.length_scale,
-                            color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
-                    plt.legend()
+                # Check if there is a perturber
+                if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers):
+                    pos_BH = self.perturbers_positions[integrator_name]  # [P, steps, 3]
+                    for pertIndex in range(pos_BH.shape[0]):
+                        # x-y plot
+                        plt.subplot(1, 2, 1)
+                        plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
+                                pos_BH[pertIndex, :, 1] * self.length_scale,
+                                color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
+                        plt.legend()
 
-                    # x-z plot
-                    plt.subplot(1, 2, 2)
-                    plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
-                            pos_BH[pertIndex, :, 2] * self.length_scale,
-                            color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
-                    plt.legend()
+                        # x-z plot
+                        plt.subplot(1, 2, 2)
+                        plt.plot(pos_BH[pertIndex, :, 0] * self.length_scale,
+                                pos_BH[pertIndex, :, 2] * self.length_scale,
+                                color='red', linestyle=['-', '--', '-.', ':'][pertIndex%4], linewidth=2, label=f'Perturber {pertIndex+1}')
+                        plt.legend()
 
             plt.tight_layout()
             filename = f'orbit_{integrator_name.lower()}.png'
@@ -886,17 +885,18 @@ class Simulation(System):
                 )
 
                 # Plot perturbers if present
-                if integrator_name in self.perturbers_positions:
-                    for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
-                        perturbers_pos_xy = self.perturbers_positions[integrator_name][pertIndex,step]
-                        ax_xy.plot(
-                            perturbers_pos_xy[0] * self.length_scale,
-                            perturbers_pos_xy[1] * self.length_scale,
-                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12,
-                            color='red', label=f'Perturber {pertIndex+1}'
-                        )
-                        if i == 0 or independantFig:
-                            ax_xy.legend(fontsize=10, loc='upper right')
+                if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers) > 0:
+                    if integrator_name in self.perturbers_positions:
+                        for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
+                            perturbers_pos_xy = self.perturbers_positions[integrator_name][pertIndex,step]
+                            ax_xy.plot(
+                                perturbers_pos_xy[0] * self.length_scale,
+                                perturbers_pos_xy[1] * self.length_scale,
+                                marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12,
+                                color='red', label=f'Perturber {pertIndex+1}'
+                            )
+                            if i == 0 or independantFig:
+                                ax_xy.legend(fontsize=10, loc='upper right')
 
                 ax_xy.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
                 ax_xy.set_ylim(-15 * self.length_scale, 15 * self.length_scale)
@@ -916,16 +916,17 @@ class Simulation(System):
                 )
 
                 # Plot perturber if present
-                if integrator_name in self.perturbers_positions:
-                    for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
-                        perturbers_pos_xz = self.perturbers_positions[integrator_name][pertIndex,step]
-                        ax_xz.plot(
-                            perturbers_pos_xz[0] * self.length_scale,
-                            perturbers_pos_xz[2] * self.length_scale,
-                            marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
-                        )
-                        if i == 0 or independantFig:
-                            ax_xz.legend(fontsize=10, loc='upper right')
+                if hasattr(self.galaxy, 'perturbers') and len(self.galaxy.perturbers) > 0:
+                    if integrator_name in self.perturbers_positions:
+                        for pertIndex in range(self.perturbers_positions[integrator_name].shape[0]):
+                            perturbers_pos_xz = self.perturbers_positions[integrator_name][pertIndex,step]
+                            ax_xz.plot(
+                                perturbers_pos_xz[0] * self.length_scale,
+                                perturbers_pos_xz[2] * self.length_scale,
+                                marker=['*', 'p', 'h', '8', 'D', 'P'][pertIndex%6], markersize=12, color='red', label=f'Perturber {pertIndex+1}'
+                            )
+                            if i == 0 or independantFig:
+                                ax_xz.legend(fontsize=10, loc='upper right')
 
                 ax_xz.set_xlim(-15 * self.length_scale, 15 * self.length_scale)
                 ax_xz.set_ylim(-5 * self.length_scale, 5 * self.length_scale)
@@ -1054,6 +1055,29 @@ class Simulation(System):
             .run()
         )
         logging.info(f"Animation_{frames_nb}_snapshots.mp4 ({0.041*frames_nb}s) saved in {path}.")
+
+    def get_energy_difference(self) -> dict:
+        """
+        Compute the absolute difference in total energy between the final and initial time steps
+        for each integrator.
+
+        Returns:
+            dict: A dictionary mapping integrator names to their absolute energy difference.
+        """
+        logging.info("Calculating absolute energy differences |E(t_f) - E(t_i)| for each integrator.")
+        energy_diff = {}
+        for integrator in self.integrators:
+            if integrator in self.total_energy and len(self.total_energy[integrator]) >= 2:
+                E_initial = self.total_energy[integrator][0]
+                E_final = self.total_energy[integrator][-1]
+                diff = abs(E_final - E_initial)
+                energy_diff[integrator] = diff
+                logging.info(f"Integrator '{integrator}': |E(t_f) - E(t_i)| = {diff:.6e}")
+            else:
+                logging.warning(f"Total energy data for integrator '{integrator}' is incomplete or missing.")
+                energy_diff[integrator] = None
+        return energy_diff
+
 
 
 def run_single_integrator(integrator_name, galaxy, dt, steps):

@@ -221,15 +221,32 @@ class Galaxy(System):
         return rho
 
 
-    def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100) -> None:
+    def initialize_stars(self, N:int, Rmax:float, alpha:float=0.05, max_iterations:int=100, use_schwarzschild:bool=True) -> None:
         """
-        Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function.
+        Initialize N stars with positions and velocities drawn from the Schwarzschild velocity distribution function
+        or placing them on circular orbits.
 
         Parameters:
             N (int): Number of stars to initialize.
             Rmax (float): Maximum radial distance (dimensionless).
             alpha (float): Small parameter for radial displacement (default: 0.05).
             max_iterations (int): Maximum number of velocity regeneration iterations (default: 100).
+            use_schwarzschild (bool): Whether to use the Schwarzschild distribution for velocities (default: True).
+        """
+        if use_schwarzschild:
+            self._initialize_stars_schwarzschild(N, Rmax, alpha, max_iterations)
+        else:
+            self._initialize_stars_circular(N, Rmax, alpha)
+
+    def _initialize_stars_schwarzschild(self, N:int, Rmax:float, alpha:float, max_iterations:int) -> None:
+        """
+        Initialize stars using the Schwarzschild velocity distribution.
+
+        Parameters:
+            N (int): Number of stars to initialize.
+            Rmax (float): Maximum radial distance (dimensionless).
+            alpha (float): Small parameter for radial displacement.
+            max_iterations (int): Maximum number of velocity regeneration iterations.
         """
         logging.info(f"Initializing {N} stars using the Schwarzschild velocity distribution function.")
 
@@ -299,7 +316,6 @@ class Galaxy(System):
 
             v_R_new = np.random.normal(0, sigma_R[idx_unbound])
             v_z_new = np.random.normal(0, sigma_z[idx_unbound])
-            #v_phi_new = v_c[idx_unbound] + (1 + 2*np.random.randint(-1,1)) * gamma[idx_unbound] * v_R_new 
             v_phi_new = v_c[idx_unbound] + np.random.normal(0, sigma_R[idx_unbound])
 
             # Compute angular momentum L_z for these stars
@@ -320,7 +336,7 @@ class Galaxy(System):
             # Identify stars with total energy >= 0 or speed exceeding escape speed
             unbound_new = (E_total_new >= 0) | (total_speed_squared >= escape_speed_squared)
             unbound[idx_unbound] = unbound_new
- 
+
             # Update velocities for bound stars
             bound_indices = idx_unbound[~unbound_new]
             v_R[bound_indices] = v_R_new[~unbound_new]
@@ -377,9 +393,83 @@ class Galaxy(System):
 
         logging.info(f"Initialization complete with {N} particles, each with mass {mass_per_star:.6e}.")
 
+    def _initialize_stars_circular(self, N:int, Rmax:float, alpha:float=0.05) -> None:
+        """
+        Initialize stars on circular orbits.
+
+        Parameters:
+            N (int): Number of stars to initialize.
+            Rmax (float): Maximum radial distance (dimensionless).
+            alpha (float): Small parameter for radial displacement (default: 0.05).
+        """
+        logging.info(f"Initializing {N} stars on circular orbits.")
+
+        # Calculate mass per star
+        mass_per_star = self.M / N  # Distribute galaxy mass equally among stars
+        logging.info(f"Mass per star: {mass_per_star:.6e} (normalized units)")
+
+        # Generate positions
+        R_c = np.random.uniform(0, Rmax, N)  # Reference radii
+        phi = np.random.uniform(0, 2 * np.pi, N)      # Angular positions
+
+        # Small radial displacements x = R - R_c
+        x = np.random.uniform(-alpha * R_c, alpha * R_c, N)  # Radial displacements
+        R = R_c + x                                         # Actual radial positions
+
+        # Ensure R is positive
+        R = np.abs(R)
+
+        # Store initial dispersions for later comparison (vectorized of zero)
+        self.initial_sigma_R = np.zeros(N)
+        self.initial_sigma_z = np.zeros(N)
+        self.R_c = R_c.copy()  # Store R_c for each star
+
+        # Positions in Cartesian coordinates
+        x_pos = R * np.cos(phi)
+        y_pos = R * np.sin(phi)
+        z_pos = np.zeros(N)  # All stars lie in the galactic plane
+
+        # Compute circular velocity at R
+        v_c = self.circular_velocity(R)  # Circular velocity at R
+
+        # Set velocities for circular orbits
+        v_R = np.zeros(N)
+        v_phi = v_c.copy()
+        v_z = np.zeros(N)
+
+        # Convert velocities to Cartesian coordinates
+        v_x = -v_phi * np.sin(phi)  # v_x = v_phi * (-sin(phi))
+        v_y = v_phi * np.cos(phi)   # v_y = v_phi * cos(phi)
+
+        # Create Particle instances with assigned mass
+        for i in range(N):
+            position = np.array([x_pos[i], y_pos[i], z_pos[i]])  # [x, y, z]
+            velocity = np.array([v_x[i], v_y[i], v_z[i]])        # [vx, vy, vz]
+            particle = Particle(position, velocity, mass=mass_per_star)  # Assign finite mass
+            self.particles.append(particle)
+
+        # Store initial data for later comparison
+        self.initial_R = R.copy()
+        self.initial_phi = phi.copy()
+        self.initial_positions = np.column_stack((x_pos, y_pos, z_pos))
+        self.initial_velocities = np.column_stack((v_x, v_y, v_z))
+        self.initial_v_R = v_R.copy()
+        self.initial_v_z = v_z.copy()
+        self.initial_v_phi = v_phi.copy()
+
+        logging.info(f"Initialization complete with {N} particles on circular orbits, each with mass {mass_per_star:.6e}.")
+
     def circular_velocity(self, R:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the circular velocity at radius R.
+
+        Parameters:
+            R : float or np.ndarray
+                Radial distance(s) (dimensionless).
+
+        Returns:
+            float or np.ndarray
+                Circular velocity v_c at each R.
         """
         dPhi_dR = self.dPhidr(R)
         v_c = np.sqrt(-R * dPhi_dR)
