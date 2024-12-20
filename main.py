@@ -1,3 +1,5 @@
+# main.py
+
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,8 +36,8 @@ def main() -> None:
 
     # Create Perturber instance
     M_BH = 1*0.07  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
+    initial_position_BH = np.array([15.0, 0.0, 5.0])  # Initial position [x, y, z]
+    initial_velocity_BH = np.array([0.0, 0.0, -0.4])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
     perturber2 = Perturber(mass=M_BH, position=-0.7*initial_position_BH, velocity=-0.5*initial_velocity_BH)
@@ -48,13 +50,13 @@ def main() -> None:
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
+    t_max = T_orbit * 0.2  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
-    selected_integrators = ['Leapfrog', 'RK4', 'Yoshida']  # Modify this list to select integrators
+    selected_integrators = ['Yoshida']  # Modify this list to select integrators
 
     # Create Simulation instance with selected integrators
     simulation = Simulation(galaxy=galaxy, dt=dt, t_max=t_max, integrators=selected_integrators, paralellised=True)
@@ -79,6 +81,7 @@ def main() -> None:
 
     # Compute and compare velocity dispersions
     simulation.compute_velocity_dispersions()
+    simulation.compute_velocity_dispersions_continuous()
 
     # Plot velocity histograms
     simulation.plot_velocity_histograms(subset=200)

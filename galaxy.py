@@ -1,3 +1,5 @@
+# galaxy.py
+
 from system import System
 from perturber import Perturber
 from particle import Particle

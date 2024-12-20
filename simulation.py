@@ -1,3 +1,7 @@
+# simulation.py
+
+from matplotlib.collections import LineCollection
+from matplotlib.colors import Normalize
 from system import System
 from galaxy import Galaxy
 from integrators import Integrator
@@ -389,6 +393,7 @@ class Simulation(System):
         Compute the radial and vertical velocity dispersions at specific moments
         (start, 1/3, 2/3, final) after integration and compare them to the initial values.
         Includes error bars representing uncertainties in the fitted dispersions.
+        Plots are in real physical units (kpc for radius and km/s for velocity dispersion).
         """
         logging.info("Computing velocity dispersions at specific moments after integration.")
 
@@ -426,19 +431,21 @@ class Simulation(System):
             for i, (moment, color) in enumerate(zip(moment_order, colors))
         }
 
-        # Compute initial sigma_R_init and sigma_z_init once
-        R_c_bins = np.linspace(np.min(self.galaxy.R_c), np.max(self.galaxy.R_c), 10)
-        indices = np.digitize(self.galaxy.R_c, R_c_bins)
+        # Define radial bins in physical units
+        R_c_bins = np.linspace(np.min(self.galaxy.R_c) * self.length_scale, 
+                            np.max(self.galaxy.R_c) * self.length_scale, 10)
+        indices = np.digitize(self.galaxy.R_c * self.length_scale, R_c_bins)
         R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])
 
+        # Compute initial sigma_R_init and sigma_z_init in physical units
         sigma_R_init = []
         sigma_z_init = []
         for i in range(1, len(R_c_bins)):
             idx = np.where(indices == i)[0]
             if len(idx) > 1:
-                # Initial sigma values (from theoretical expressions)
-                sigma_R_initial_val = np.mean(self.galaxy.initial_sigma_R[idx])
-                sigma_z_initial_val = np.mean(self.galaxy.initial_sigma_z[idx])
+                # Initial sigma values (from theoretical expressions) converted to km/s
+                sigma_R_initial_val = np.mean(self.galaxy.initial_sigma_R[idx]) * self.velocity_scale_kms
+                sigma_z_initial_val = np.mean(self.galaxy.initial_sigma_z[idx]) * self.velocity_scale_kms
                 sigma_R_init.append(sigma_R_initial_val)
                 sigma_z_init.append(sigma_z_initial_val)
             else:
@@ -463,16 +470,16 @@ class Simulation(System):
                 vel = self.velocities[integrator_name][step_idx]  # [N, 3]
 
                 # Compute cylindrical coordinates
-                x = pos[:, 0]
-                y = pos[:, 1]
-                z = pos[:, 2]
+                x = pos[:, 0] * self.length_scale  # Convert to kpc
+                y = pos[:, 1] * self.length_scale  # Convert to kpc
+                z = pos[:, 2] * self.length_scale  # Convert to kpc
                 R = np.sqrt(x**2 + y**2)
                 phi = np.arctan2(y, x)
 
-                # Compute velocities in cylindrical coordinates
-                v_x = vel[:, 0]
-                v_y = vel[:, 1]
-                v_z = vel[:, 2]
+                # Compute velocities in cylindrical coordinates and convert to km/s
+                v_x = vel[:, 0] * self.velocity_scale_kms  # Convert to km/s
+                v_y = vel[:, 1] * self.velocity_scale_kms  # Convert to km/s
+                v_z = vel[:, 2] * self.velocity_scale_kms  # Convert to km/s
 
                 # Compute radial and azimuthal velocities
                 with np.errstate(divide='ignore', invalid='ignore'):
@@ -536,8 +543,8 @@ class Simulation(System):
                     # Plot sigma_R
                     plt.errorbar(
                         R_c_centers,
-                        dispersions_R[moment_label],
-                        yerr=uncertainties_R[moment_label],
+                        np.array(dispersions_R[moment_label]),
+                        yerr=np.array(uncertainties_R[moment_label]),
                         marker=moment_styles[moment_label]['marker_R'],
                         linestyle=moment_styles[moment_label]['linestyle_R'],
                         label=f"{moment_label} σ_R",
@@ -549,8 +556,8 @@ class Simulation(System):
                     # Plot sigma_z
                     plt.errorbar(
                         R_c_centers,
-                        dispersions_z[moment_label],
-                        yerr=uncertainties_z[moment_label],
+                        np.array(dispersions_z[moment_label]),
+                        yerr=np.array(uncertainties_z[moment_label]),
                         marker=moment_styles[moment_label]['marker_z'],
                         linestyle=moment_styles[moment_label]['linestyle_z'],
                         label=f"{moment_label} σ_z",
@@ -561,19 +568,21 @@ class Simulation(System):
                     )
 
             # Plot initial theoretical dispersions as solid lines
+            sigma_R_init = np.array(sigma_R_init)
+            sigma_z_init = np.array(sigma_z_init)
             plt.plot(R_c_centers, sigma_R_init, 'k-', label='Initial σ_R (Theoretical)', linewidth=2)
             plt.plot(R_c_centers, sigma_z_init, 'k--', label='Initial σ_z (Theoretical)', linewidth=2)
 
-            plt.xlabel('Reference Radius $R_c$ (dimensionless)', fontsize=16)
-            plt.ylabel('Velocity Dispersion σ (dimensionless)', fontsize=16)
+            plt.xlabel('Reference Radius $R_c$ (kpc)', fontsize=16)
+            plt.ylabel('Velocity Dispersion σ (km/s)', fontsize=16)
             plt.title(f'Velocity Dispersions at Different Moments ({integrator_name})', fontsize=18)
 
             # Place the legend outside the plot to avoid overlapping with data
-            plt.legend(fontsize=12, bbox_to_anchor=(1, 1), loc='upper left')
+            plt.legend(fontsize=12, bbox_to_anchor=(1.05, 1), loc='upper left')
             plt.grid(True, linestyle='--', alpha=0.7)
             plt.tight_layout(rect=[0, 0, 1, 1])  # Adjust the rect to make space for the legend
 
-            filename = f'velocity_dispersions_{integrator_name.lower()}_moments.png'
+            filename = f'velocity_dispersions_{integrator_name.lower()}_moments_physical.png'
             plt.savefig(os.path.join(self.results_dir, filename))
             plt.close()
             logging.info(f"Velocity dispersion comparison plot with moments for {integrator_name} saved to '{self.results_dir}/{filename}'.")
@@ -594,10 +603,194 @@ class Simulation(System):
                         sigma_z = np.nan
                         sigma_R_unc = np.nan
                         sigma_z_unc = np.nan
-                    logging.info(f"{integrator_name} - Moment: {moment_label}, R_c = {R_c_centers[i]:.2f}: "
-                                f"σ_R = {sigma_R:.4f} ± {sigma_R_unc:.4f}, "
-                                f"σ_z = {sigma_z:.4f} ± {sigma_z_unc:.4f}, "
-                                f"Initial σ_R = {sigma_R_init_val:.4f}, Initial σ_z = {sigma_z_init_val:.4f}")
+                    logging.info(f"{integrator_name} - Moment: {moment_label}, R_c = {R_c_centers[i]:.2f} kpc: "
+                                f"σ_R = {sigma_R:.2f} ± {sigma_R_unc:.2f} km/s, "
+                                f"σ_z = {sigma_z:.2f} ± {sigma_z_unc:.2f} km/s, "
+                                f"Initial σ_R = {sigma_R_init_val:.2f} km/s, Initial σ_z = {sigma_z_init_val:.2f} km/s")
+
+    def compute_velocity_dispersions_continuous(self) -> None:
+        """
+        Compute the radial (σ_R) and vertical (σ_z) velocity dispersions over time
+        and plot them as continuous curves with respect to the simulation time.
+        Utilizes a color gradient to highlight the increase in velocity dispersion over time.
+        Plots are in real physical units (kpc for radius and km/s for velocity dispersion).
+        """
+        logging.info("Computing continuous velocity dispersions over time and radius.")
+
+        # Define radial bins in physical units (kpc)
+        R_min = np.min(self.galaxy.R_c) * self.length_scale
+        R_max = np.max(self.galaxy.R_c) * self.length_scale
+        num_bins = 100  # Number of radial bins
+        R_c_bins = np.linspace(R_min, R_max, num_bins + 1)  # (num_bins +1,)
+        R_c_centers = 0.5 * (R_c_bins[:-1] + R_c_bins[1:])  # (num_bins,)
+        indices = np.digitize(self.galaxy.R_c * self.length_scale, R_c_bins)  # (N,)
+
+        # Define time sampling parameters
+        max_samples = 1000  # Maximum number of samples to plot for clarity
+        sample_interval = max(1, self.steps // max_samples)  # Adjust sample interval based on steps
+        sampled_steps = np.arange(0, self.steps, sample_interval)
+        if (self.steps - 1) not in sampled_steps:
+            sampled_steps = np.append(sampled_steps, self.steps - 1)  # Ensure final step is included
+
+        # Initialize dictionaries to store σ_R and σ_z over time and radius
+        sigma_R_time = {integrator: [] for integrator in self.integrators}
+        sigma_z_time = {integrator: [] for integrator in self.integrators}
+        time_values = {integrator: [] for integrator in self.integrators}
+
+        # Loop over integrators and sampled steps to compute dispersions
+        for integrator_name in self.integrators:
+            logging.info(f"Processing dispersions for integrator: {integrator_name}")
+            for step_idx in sampled_steps:
+                # Extract positions and velocities at the step
+                pos = self.positions[integrator_name][step_idx]  # [N, 3]
+                vel = self.velocities[integrator_name][step_idx]  # [N, 3]
+
+                # Convert positions to physical units (kpc)
+                x = pos[:, 0] * self.length_scale
+                y = pos[:, 1] * self.length_scale
+                z = pos[:, 2] * self.length_scale
+                R = np.sqrt(x**2 + y**2)
+                phi = np.arctan2(y, x)
+
+                # Convert velocities to physical units (km/s)
+                v_x = vel[:, 0] * self.velocity_scale_kms
+                v_y = vel[:, 1] * self.velocity_scale_kms
+                v_z = vel[:, 2] * self.velocity_scale_kms
+
+                # Compute radial and azimuthal velocities
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    v_R = (x * v_x + y * v_y) / R
+                    v_phi = (x * v_y - y * v_x) / R
+
+                # Handle division by zero for R=0
+                v_R = np.nan_to_num(v_R)
+                v_phi = np.nan_to_num(v_phi)
+
+                # Compute residual velocities
+                delta_v_R = v_R
+                delta_v_z = v_z
+
+                # Compute dispersions in each radial bin
+                for j in range(1, len(R_c_bins)):
+                    idx = np.where(indices == j)[0]
+                    if len(idx) > 1:
+                        # Radial velocity dispersion (σ_R)
+                        sigma_R = np.std(delta_v_R[idx])
+                        sigma_R_time[integrator_name].append(sigma_R)  # Already in km/s
+
+                        # Vertical velocity dispersion (σ_z)
+                        sigma_z = np.std(delta_v_z[idx])
+                        sigma_z_time[integrator_name].append(sigma_z)  # Already in km/s
+                    else:
+                        sigma_R_time[integrator_name].append(np.nan)
+                        sigma_z_time[integrator_name].append(np.nan)
+
+                # Record the current time in Myr
+                current_time = step_idx * self.dt * self.time_scale  # Convert to Myr
+                time_values[integrator_name].extend([current_time] * num_bins)
+
+        # Ensure the 'results_dir' exists
+        if not os.path.exists(self.results_dir):
+            os.makedirs(self.results_dir)
+            logging.info(f"Created directory '{self.results_dir}' for saving plots.")
+
+        # Function to plot σ vs R_c with color gradient representing time
+        def plot_sigma_vs_Rc(integrator_name, sigma_time, time_vals, sigma_label, cmap_name, filename):
+            """
+            Plot σ vs R_c curves colored by time.
+
+            Parameters:
+                integrator_name (str): Name of the integrator.
+                sigma_time (list of floats): Velocity dispersions at sampled steps and radial bins.
+                time_vals (list of floats): Corresponding simulation times for each σ value.
+                sigma_label (str): Label for the velocity dispersion (σ_R or σ_z).
+                cmap_name (str): Colormap name.
+                filename (str): Filename to save the plot.
+            """
+            fig, ax = plt.subplots(figsize=(14, 8))
+
+            # Number of sampled steps
+            num_samples = len(sampled_steps)
+
+            # Number of radial bins
+            num_bins = len(R_c_centers)
+
+            # Reshape sigma_time and time_vals
+            sigma_array = np.array(sigma_time).reshape(num_samples, num_bins)  # [samples, bins]
+            time_array = np.array(time_vals).reshape(num_samples, num_bins)    # [samples, bins]
+
+            # Create a colormap and normalization based on time
+            cmap = plt.get_cmap(cmap_name)
+            norm = Normalize(vmin=0, vmax=self.t_max * self.time_scale)  # Normalize to physical time (Myr)
+
+            # Collect all lines and their corresponding times
+            lines = []
+            colors = []
+            for i in range(num_samples):
+                sigma_vals = sigma_array[i]
+                R_vals = R_c_centers
+                # Create (R, σ) pairs, ignoring NaNs
+                valid = ~np.isnan(sigma_vals)
+                if np.any(valid):
+                    line = np.stack([R_vals[valid], sigma_vals[valid]], axis=1)
+                    lines.append(line)
+                    # Assign the time of this step to the color
+                    colors.append(time_array[i][valid][0])  # Assuming all valid σ have the same time
+
+            # Create LineCollection
+            lc = LineCollection(lines, cmap=cmap, norm=norm, linewidth=2, alpha=0.8)
+            lc.set_array(np.array(colors))
+            lc.set_linewidth(2)
+
+            # Add LineCollection to the axes
+            ax.add_collection(lc)
+
+            # Set limits
+            ax.set_xlim(R_min, R_max)
+            sigma_max = np.nanmax(sigma_array)
+            ax.set_ylim(0, sigma_max * 1.1)  # Slight padding
+
+            # Add colorbar
+            cbar = fig.colorbar(lc, ax=ax)
+            cbar.set_label('Time (Myr)', fontsize=14)
+
+            # Set labels and title
+            ax.set_xlabel('Radius $R_c$ (kpc)', fontsize=16)
+            ax.set_ylabel(f'{sigma_label} (km/s)', fontsize=16)
+            ax.set_title(f'{sigma_label} vs Radius $R_c$ Over Time ({integrator_name})', fontsize=18)
+
+            # Add grid
+            ax.grid(True, linestyle='--', alpha=0.5)
+
+            # Save the figure
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.close(fig)
+            logging.info(f"{sigma_label} vs R_c plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
+
+        # Plot σ_R
+        for integrator_name in self.integrators:
+            logging.info(f"Plotting σ_R vs R_c for {integrator_name}")
+            plot_sigma_vs_Rc(
+                integrator_name=integrator_name,
+                sigma_time=sigma_R_time[integrator_name],
+                time_vals=time_values[integrator_name],
+                sigma_label='Radial Velocity Dispersion σ_R',
+                cmap_name='viridis',
+                filename=f'velocity_dispersion_sigmaR_time_gradient_{integrator_name.lower()}.png'
+            )
+
+        # Plot σ_z
+        for integrator_name in self.integrators:
+            logging.info(f"Plotting σ_z vs R_c for {integrator_name}")
+            plot_sigma_vs_Rc(
+                integrator_name=integrator_name,
+                sigma_time=sigma_z_time[integrator_name],
+                time_vals=time_values[integrator_name],
+                sigma_label='Vertical Velocity Dispersion σ_z',
+                cmap_name='plasma',
+                filename=f'velocity_dispersion_sigmaZ_time_gradient_{integrator_name.lower()}.png'
+            )
 
     def plot_velocity_histograms(self, subset:int=200) -> None:
         """
