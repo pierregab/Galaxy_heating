@@ -36,7 +36,7 @@ def main() -> None:
 
     # Create Perturber instance
     M_BH = 1*0.07  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([15.0, 0.0, 5.0])  # Initial position [x, y, z]
+    initial_position_BH = np.array([5.0, 0.0, 5.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.0, -0.4])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)

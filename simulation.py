@@ -613,6 +613,7 @@ class Simulation(System):
         Compute the radial (σ_R) and vertical (σ_z) velocity dispersions over time
         and plot them as continuous curves with respect to the simulation time.
         Utilizes a color gradient to highlight the increase in velocity dispersion over time.
+        Overlays the theoretical initial dispersions for σ_R and σ_z.
         Plots are in real physical units (kpc for radius and km/s for velocity dispersion).
         """
         logging.info("Computing continuous velocity dispersions over time and radius.")
@@ -637,9 +638,42 @@ class Simulation(System):
         sigma_z_time = {integrator: [] for integrator in self.integrators}
         time_values = {integrator: [] for integrator in self.integrators}
 
+        # Initialize dictionaries to store theoretical initial dispersions
+        # These should be predefined theoretical values, not derived from simulation data
+        # Assuming self.galaxy.initial_sigma_R and self.galaxy.initial_sigma_z are arrays of initial theoretical dispersions per star
+        # We need to compute the theoretical σ_R_init and σ_z_init per radial bin
+        sigma_R_init_dict = {}
+        sigma_z_init_dict = {}
+
+        for integrator_name in self.integrators:
+            logging.info(f"Processing theoretical initial dispersions for integrator: {integrator_name}")
+
+            # Retrieve theoretical initial dispersions from the galaxy object
+            # Assuming these are provided as arrays corresponding to each star
+            initial_sigma_R = self.galaxy.initial_sigma_R * self.velocity_scale_kms  # Convert to km/s
+            initial_sigma_z = self.galaxy.initial_sigma_z * self.velocity_scale_kms  # Convert to km/s
+
+            sigma_R_init = []
+            sigma_z_init = []
+            for j in range(1, len(R_c_bins)):
+                idx = np.where(indices == j)[0]
+                if len(idx) > 1:
+                    # Theoretical initial sigma values for this radial bin
+                    sigma_R_initial_val = np.mean(initial_sigma_R[idx])
+                    sigma_z_initial_val = np.mean(initial_sigma_z[idx])
+                    sigma_R_init.append(sigma_R_initial_val)
+                    sigma_z_init.append(sigma_z_initial_val)
+                else:
+                    # Not enough stars to compute dispersion
+                    sigma_R_init.append(np.nan)
+                    sigma_z_init.append(np.nan)
+            
+            sigma_R_init_dict[integrator_name] = sigma_R_init
+            sigma_z_init_dict[integrator_name] = sigma_z_init
+
         # Loop over integrators and sampled steps to compute dispersions
         for integrator_name in self.integrators:
-            logging.info(f"Processing dispersions for integrator: {integrator_name}")
+            logging.info(f"Processing dispersions over time for integrator: {integrator_name}")
             for step_idx in sampled_steps:
                 # Extract positions and velocities at the step
                 pos = self.positions[integrator_name][step_idx]  # [N, 3]
@@ -694,10 +728,10 @@ class Simulation(System):
             os.makedirs(self.results_dir)
             logging.info(f"Created directory '{self.results_dir}' for saving plots.")
 
-        # Function to plot σ vs R_c with color gradient representing time
-        def plot_sigma_vs_Rc(integrator_name, sigma_time, time_vals, sigma_label, cmap_name, filename):
+        # Function to plot σ vs R_c with color gradient representing time and overlay theoretical initial dispersions
+        def plot_sigma_vs_Rc(integrator_name, sigma_time, time_vals, sigma_label, cmap_name, filename, sigma_init):
             """
-            Plot σ vs R_c curves colored by time.
+            Plot σ vs R_c curves colored by time and overlay theoretical initial dispersions.
 
             Parameters:
                 integrator_name (str): Name of the integrator.
@@ -706,6 +740,7 @@ class Simulation(System):
                 sigma_label (str): Label for the velocity dispersion (σ_R or σ_z).
                 cmap_name (str): Colormap name.
                 filename (str): Filename to save the plot.
+                sigma_init (list of floats): Theoretical initial velocity dispersions.
             """
             fig, ax = plt.subplots(figsize=(14, 8))
 
@@ -738,12 +773,16 @@ class Simulation(System):
                     colors.append(time_array[i][valid][0])  # Assuming all valid σ have the same time
 
             # Create LineCollection
-            lc = LineCollection(lines, cmap=cmap, norm=norm, linewidth=2, alpha=0.8)
+            lc = LineCollection(lines, cmap=cmap, norm=norm, linewidth=1.5, alpha=0.4, zorder=1)
             lc.set_array(np.array(colors))
-            lc.set_linewidth(2)
-
-            # Add LineCollection to the axes
             ax.add_collection(lc)
+
+            # Plot theoretical initial dispersions as distinct lines
+            sigma_init = np.array(sigma_init)
+            if sigma_label == 'Radial Velocity Dispersion σ_R':
+                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial σ_R (Theoretical)', zorder=3)
+            elif sigma_label == 'Vertical Velocity Dispersion σ_z':
+                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial σ_z (Theoretical)', zorder=3)
 
             # Set limits
             ax.set_xlim(R_min, R_max)
@@ -752,19 +791,26 @@ class Simulation(System):
 
             # Add colorbar
             cbar = fig.colorbar(lc, ax=ax)
-            cbar.set_label('Time (Myr)', fontsize=14)
+            cbar.set_label('Time (Myr)', fontsize=14, fontweight='bold')
+            cbar.set_ticks(np.linspace(0, self.t_max * self.time_scale, 5))
+            cbar.ax.tick_params(labelsize=12)
 
             # Set labels and title
-            ax.set_xlabel('Radius $R_c$ (kpc)', fontsize=16)
-            ax.set_ylabel(f'{sigma_label} (km/s)', fontsize=16)
-            ax.set_title(f'{sigma_label} vs Radius $R_c$ Over Time ({integrator_name})', fontsize=18)
+            ax.set_xlabel('Radius $R_c$ (kpc)', fontsize=16, fontweight='bold')
+            ax.set_ylabel(f'{sigma_label} (km s$^{{-1}}$)', fontsize=16, fontweight='bold')
+            ax.set_title(f'{sigma_label} vs. Radius $R_c$ Over Time ({integrator_name})', fontsize=20, fontweight='bold')
 
             # Add grid
-            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.7)
 
-            # Save the figure
+            # Add legend
+            ax.legend(fontsize=12, loc='upper right')
+
+            fig.subplots_adjust(right=0.7)  # Adjust this value as needed
+
+            # Save the figure in high resolution and vector format
             plt.tight_layout()
-            plt.savefig(os.path.join(self.results_dir, filename))
+            plt.savefig(os.path.join(self.results_dir, filename), dpi=300, format='png')
             plt.close(fig)
             logging.info(f"{sigma_label} vs R_c plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
@@ -776,8 +822,9 @@ class Simulation(System):
                 sigma_time=sigma_R_time[integrator_name],
                 time_vals=time_values[integrator_name],
                 sigma_label='Radial Velocity Dispersion σ_R',
-                cmap_name='viridis',
-                filename=f'velocity_dispersion_sigmaR_time_gradient_{integrator_name.lower()}.png'
+                cmap_name='cividis',  # Colorblind-friendly colormap
+                filename=f'velocity_dispersion_sigmaR_time_gradient_{integrator_name.lower()}.png',
+                sigma_init=sigma_R_init_dict[integrator_name]
             )
 
         # Plot σ_z
@@ -788,10 +835,11 @@ class Simulation(System):
                 sigma_time=sigma_z_time[integrator_name],
                 time_vals=time_values[integrator_name],
                 sigma_label='Vertical Velocity Dispersion σ_z',
-                cmap_name='plasma',
-                filename=f'velocity_dispersion_sigmaZ_time_gradient_{integrator_name.lower()}.png'
+                cmap_name='magma',  # Consider 'magma' or 'inferno' if preferred
+                filename=f'velocity_dispersion_sigmaZ_time_gradient_{integrator_name.lower()}.png',
+                sigma_init=sigma_z_init_dict[integrator_name]
             )
-
+            
     def plot_velocity_histograms(self, subset:int=200) -> None:
         """
         Plot histograms of initial and final velocity distributions.
