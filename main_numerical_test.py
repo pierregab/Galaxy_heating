@@ -6,13 +6,22 @@ from perturber import Perturber
 from simulation import Simulation
 import os
 import gc  # Import garbage collection module
+import copy  # Import the copy module for deepcopy
 
 # Set up professional logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Change dpi setting for higher resolution plots
-plt.rcParams['figure.dpi'] = 150
-
+# Configure Matplotlib to use LaTeX for all text elements
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.size": 12,
+    "axes.labelsize": 14,
+    "axes.titlesize": 16,
+    "legend.fontsize": 12,
+    "xtick.labelsize": 12,
+    "ytick.labelsize": 12,
+})
 
 def main() -> None:
     # ============================================================
@@ -32,17 +41,17 @@ def main() -> None:
     galaxy = Galaxy(mass=1.0, a=2.0, b=0.1, epsilon=0.1)
 
     # Initialize stars with the Schwarzschild velocity distribution
-    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100, use_schwarzschild=True)
+    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100, use_schwarzschild=False)
 
     # Create Perturber instance
-    M_BH = 1*0.07  # Mass of the perturber (normalized)
+    M_BH = 1 * 0.07  # Mass of the perturber (normalized)
     initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
     # Set the perturber in the galaxy
-    galaxy.set_perturbers(perturber1)
+    # galaxy.set_perturbers(perturber1)
 
     # Compute an approximate orbital period at R=Rmax
     Omega_max = galaxy.omega(Rmax)
@@ -52,103 +61,164 @@ def main() -> None:
     t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step array for test 
-    dt_values = [1e1,1, 1e-1, 1e-2, 1e-3]  # Renamed variable to avoid overwriting
+    dt_values = [1, 1e-1]  # Renamed variable to avoid overwriting
+
+    # Number of runs per dt to gather statistics
+    n_runs = 5 # Adjust based on computational resources
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
     selected_integrators = ['Leapfrog', 'RK4', 'Yoshida']  # Modify this list to select integrators
 
-    # Initialize a dictionary to store energy differences for each integrator
-    energy_diff_dict = {integrator: [] for integrator in selected_integrators}
+    # Initialize a dictionary to store energy differences for each integrator and dt
+    # Structure: energy_diff_dict[integrator][dt] = list of diffs
+    energy_diff_dict = {integrator: {dt: [] for dt in dt_values} for integrator in selected_integrators}
 
     for dt in dt_values:
+        logging.info(f"Running simulations with time step dt = {dt}")
 
-        logging.info(f"Running simulation with time step dt = {dt}")
+        for run in range(1, n_runs + 1):
+            logging.info(f"  Run {run}/{n_runs} for dt = {dt}")
 
-        # Create Simulation instance with selected integrators
-        simulation = Simulation(
-            galaxy=galaxy,
-            dt=dt,
-            t_max=t_max,
-            integrators=selected_integrators,
-            paralellised=True
+            # Create a fresh Simulation instance for each run to avoid state carry-over
+            simulation = Simulation(
+                galaxy=copy.deepcopy(galaxy),  # Use deepcopy to create an independent copy
+                dt=dt,
+                t_max=t_max,
+                integrators=selected_integrators,
+                paralellised=True
+            )
+
+            try:
+                # Plot the galaxy potential before running the simulation
+                simulation.plot_equipotential()
+
+                # Run the simulation
+                simulation.run()
+
+                # Compute the absolute energy differences
+                energy_differences = simulation.get_energy_difference()
+
+                # Store the energy differences for each integrator
+                for integrator, diff in energy_differences.items():
+                    if diff is not None:
+                        energy_diff_dict[integrator][dt].append(diff)
+                    else:
+                        energy_diff_dict[integrator][dt].append(np.nan)  # Use NaN for missing data
+
+            except Exception as e:
+                logging.error(f"An error occurred during simulation run {run} with dt={dt}: {e}")
+                for integrator in selected_integrators:
+                    energy_diff_dict[integrator][dt].append(np.nan)
+            finally:
+                # ============================================================
+                # Clear Cache After Each Simulation
+                # ============================================================
+                logging.info(f"  Clearing cache after simulation run {run} with dt = {dt}")
+
+                # Close all Matplotlib figures to free memory
+                plt.close('all')
+
+                # Delete simulation object and any arrays inside it
+                del simulation
+
+                # Perform garbage collection
+                gc.collect()
+
+    # ============================================================
+    # Compute Statistics for Energy Differences
+    # ============================================================
+
+    # Initialize dictionaries to store mean and std deviation
+    energy_diff_mean = {integrator: [] for integrator in selected_integrators}
+    energy_diff_std = {integrator: [] for integrator in selected_integrators}
+
+    for integrator in selected_integrators:
+        for dt in dt_values:
+            diffs = np.array(energy_diff_dict[integrator][dt])
+            # Remove NaN values before computing statistics
+            diffs = diffs[~np.isnan(diffs)]
+            if len(diffs) > 0:
+                mean_diff = np.mean(diffs)
+                std_diff = np.std(diffs)
+            else:
+                mean_diff = np.nan
+                std_diff = np.nan
+            energy_diff_mean[integrator].append(mean_diff)
+            energy_diff_std[integrator].append(std_diff)
+
+    # ============================================================
+    # Plot Energy Difference vs. Time Step (dt) with Error Bars
+    # ============================================================
+
+    logging.info("Generating Energy Difference vs. Time Step (dt) plot with error bars.")
+
+    # Create figure and axes using subplots
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Define machine epsilon for double precision
+    machine_epsilon = np.finfo(float).eps
+
+    for integrator in selected_integrators:
+        mean_diffs = np.array(energy_diff_mean[integrator])
+        std_diffs = np.array(energy_diff_std[integrator])
+
+        # Remove NaN entries for plotting
+        valid = ~np.isnan(mean_diffs) & ~np.isnan(std_diffs)
+        dt_plot = np.array(dt_values)[valid]
+        mean_plot = mean_diffs[valid]
+        std_plot = std_diffs[valid]
+
+        # Plot on log-log scale with error bars
+        ax.errorbar(
+            dt_plot,
+            mean_plot,
+            yerr=std_plot,
+            marker='o',
+            label=integrator,
+            linewidth=2,
+            markersize=6,
+            capsize=4
         )
 
-        try:
-            # Plot the galaxy potential before running the simulation
-            simulation.plot_equipotential()
+    # Plot the machine epsilon as a horizontal dashed line
+    ax.axhline(y=machine_epsilon, color='red', linestyle='--', linewidth=1.5, label=r'\textbf{Machine Precision}')
 
-            # Run the simulation
-            simulation.run()
+    # Annotate the machine epsilon line using axes coordinates for visibility
+    ax.text(
+        0.8,  # x position (5% from the left)
+        0.15,  # y position (95% from the bottom)
+        r'$\epsilon_{\mathrm{machine}} \approx 2.22 \times 10^{-16}$',
+        color='red',
+        fontsize=12,
+        verticalalignment='top',
+        horizontalalignment='left',
+        transform=ax.transAxes  # Use axes coordinates
+    )
 
-            # Compute the absolute energy differences
-            energy_differences = simulation.get_energy_difference()
+    # Use LaTeX for labels and title
+    ax.set_xlabel(r'\textbf{Time Step} ($dt$) \textbf{(dimensionless)}', fontsize=14)
+    ax.set_ylabel(r'\textbf{Absolute Energy Difference} ($|E(t_f) - E(t_i)|$) \textbf{(dimensionless)}', fontsize=14)
+    ax.set_title(r'\textbf{Evolution of Absolute Energy Difference with Time Step for Each Integrator}', fontsize=16)
 
-            # Store the energy differences for each integrator
-            for integrator, diff in energy_differences.items():
-                if diff is not None:
-                    energy_diff_dict[integrator].append((dt, diff))
-                else:
-                    energy_diff_dict[integrator].append((dt, np.nan))  # Use NaN for missing data
+    ax.legend(fontsize=12)
+    ax.grid(True, which="both", linestyle='--', linewidth=0.5)
 
-        except Exception as e:
-            logging.error(f"An error occurred during simulation with dt={dt}: {e}")
-            for integrator in selected_integrators:
-                energy_diff_dict[integrator].append((dt, np.nan))
-        finally:
-            # ============================================================
-            # Clear Cache After Each Simulation
-            # ============================================================
-            logging.info(f"Clearing cache after simulation with dt = {dt}")
+    # Set log-log scale for better visualization
+    ax.set_yscale('log')
+    ax.set_xscale('log')
 
-            # Close all Matplotlib figures to free memory
-            plt.close('all')
+    # Enable minor ticks
+    ax.minorticks_on()
 
-            # Delete simulation object and any arrays inside it
-            del simulation
+    # Adjust layout manually to accommodate annotations
+    plt.subplots_adjust(left=0.1, right=0.95, top=1, bottom=0.1)
 
-            # Explicitly clear NumPy arrays
-            for name in dir():  # Loop through all variables
-                obj = eval(name)
-                if isinstance(obj, np.ndarray):  # Check if it's a NumPy array
-                    del obj  # Delete the NumPy array
-
-            # Perform garbage collection
-            gc.collect()
-
-
-    # ============================================================
-    # Plot Energy Difference vs. Time Step (dt)
-    # ============================================================
-
-    logging.info("Generating Energy Difference vs. Time Step (dt) plot.")
-
-    plt.figure(figsize=(10, 6))
-
-    for integrator, data in energy_diff_dict.items():
-        # Sort the data by dt in ascending order
-        data_sorted = sorted(data, key=lambda x: x[0])
-        dt_sorted, energy_diff_sorted = zip(*data_sorted)
-
-        # Convert to numpy arrays for better handling
-        dt_array = np.array(dt_sorted)
-        energy_diff_array = np.array(energy_diff_sorted)
-
-        # Plot on log-log scale
-        plt.loglog(dt_array, energy_diff_array, marker='o', label=integrator, linewidth=2)
-
-    plt.xlabel('Time Step (dt) (dimensionless)', fontsize=14)
-    plt.ylabel('|E(t_f) - E(t_i)| (dimensionless)', fontsize=14)
-    plt.title('Evolution of Absolute Energy Difference with Time Step for Each Integrator', fontsize=16)
-    plt.legend(fontsize=12)
-    plt.grid(True, which="both", linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-
-    # Save the plot
+    # Save the plot with higher resolution
     # Ensure that the results directory exists
     results_dir = 'result'  # Define your results directory
     os.makedirs(results_dir, exist_ok=True)
     energy_diff_plot_path = os.path.join(results_dir, 'energy_difference_vs_dt.png')
-    plt.savefig(energy_diff_plot_path)
+    plt.savefig(energy_diff_plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     logging.info(f"Energy Difference vs. Time Step plot saved to '{energy_diff_plot_path}'.")
 
@@ -156,11 +226,6 @@ def main() -> None:
     # plt.show()
 
     logging.info("Energy Difference vs. Time Step Analysis Completed.")
-
-
-
-
-
 
 if __name__ == '__main__':
     main()
