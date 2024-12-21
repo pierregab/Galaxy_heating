@@ -25,7 +25,7 @@ plt.rcParams.update({
 
 def main() -> None:
     # ============================================================
-    # Initial Conditions (Dimensionless Units)
+    # Simulation Parameters
     # ============================================================
 
     # Number of stars
@@ -34,37 +34,21 @@ def main() -> None:
     # Maximum radial distance (Rmax) in dimensionless units
     Rmax = 10.0  # Adjust based on the simulation needs
 
-    # Logging simulation properties
-    logging.info("Starting the simulation with the following properties:")
+    # Mass of the perturber (normalized)
+    M_BH = 1 * 0.07  
 
-    # Create Galaxy instance
-    galaxy = Galaxy(mass=1.0, a=2.0, b=0.1, epsilon=0.1)
+    # Initial position and velocity of the perturber
+    initial_position_BH = np.array([5.0, 0.0, 4.0])  # [x, y, z]
+    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # [vx, vy, vz]
 
-    # Initialize stars with the Schwarzschild velocity distribution
-    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100, use_schwarzschild=False)
+    # Perturber instance (to be deep-copied if needed)
+    base_perturber = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
 
-    # Create Perturber instance
-    M_BH = 1 * 0.07  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 4.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.05, -0.2])  # Initial velocity [vx, vy, vz]
-
-    perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
-
-    # Set the perturber in the galaxy
-    # galaxy.set_perturbers(perturber1)
-
-    # Compute an approximate orbital period at R=Rmax
-    Omega_max = galaxy.omega(Rmax)
-    T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
-
-    # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
-
-    # Time step array for test 
-    dt_values = [1, 1e-1]  # Renamed variable to avoid overwriting
+    # Time step array for tests
+    dt_values = [1, 1e-1, 1e-2, 1e-3]  # Renamed variable to avoid overwriting
 
     # Number of runs per dt to gather statistics
-    n_runs = 5 # Adjust based on computational resources
+    n_runs = 3  # Adjust based on computational resources
 
     # Select integrators to run: 'Leapfrog', 'RK4', or both
     selected_integrators = ['Leapfrog', 'RK4', 'Yoshida']  # Modify this list to select integrators
@@ -79,16 +63,39 @@ def main() -> None:
         for run in range(1, n_runs + 1):
             logging.info(f"  Run {run}/{n_runs} for dt = {dt}")
 
-            # Create a fresh Simulation instance for each run to avoid state carry-over
-            simulation = Simulation(
-                galaxy=copy.deepcopy(galaxy),  # Use deepcopy to create an independent copy
-                dt=dt,
-                t_max=t_max,
-                integrators=selected_integrators,
-                paralellised=True
-            )
-
             try:
+                # ============================================================
+                # Initialize Galaxy and Perturber for Each Run
+                # ============================================================
+
+                # Create a fresh Galaxy instance
+                galaxy = Galaxy(mass=1.0, a=2.0, b=0.1, epsilon=0.1)
+
+                # Initialize stars with the Schwarzschild velocity distribution
+                galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100, use_schwarzschild=False)
+
+                # Create a fresh Perturber instance (deep copy if necessary)
+                perturber = copy.deepcopy(base_perturber)
+
+                # Set the perturber in the galaxy
+                galaxy.set_perturbers(perturber)
+
+                # Compute an approximate orbital period at R=Rmax for the current galaxy
+                Omega_max = galaxy.omega(Rmax)
+                T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
+
+                # Total simulation time should be at least one orbital period at Rmax
+                t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
+
+                # Create a fresh Simulation instance for each run to avoid state carry-over
+                simulation = Simulation(
+                    galaxy=copy.deepcopy(galaxy),  # Use deepcopy to create an independent copy
+                    dt=dt,
+                    t_max=t_max,
+                    integrators=selected_integrators,
+                    paralellised=True
+                )
+
                 # Plot the galaxy potential before running the simulation
                 simulation.plot_equipotential()
 
@@ -132,11 +139,16 @@ def main() -> None:
     energy_diff_mean = {integrator: [] for integrator in selected_integrators}
     energy_diff_std = {integrator: [] for integrator in selected_integrators}
 
+    # Define a small tolerance to exclude near-zero values (optional)
+    zero_tolerance = 1e-17
+
     for integrator in selected_integrators:
         for dt in dt_values:
             diffs = np.array(energy_diff_dict[integrator][dt])
             # Remove NaN values before computing statistics
             diffs = diffs[~np.isnan(diffs)]
+            # Remove zero or near-zero values based on tolerance
+            diffs = diffs[np.abs(diffs) > zero_tolerance]
             if len(diffs) > 0:
                 mean_diff = np.mean(diffs)
                 std_diff = np.std(diffs)
@@ -153,7 +165,7 @@ def main() -> None:
     logging.info("Generating Energy Difference vs. Time Step (dt) plot with error bars.")
 
     # Create figure and axes using subplots
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
     # Define machine epsilon for double precision
     machine_epsilon = np.finfo(float).eps
@@ -185,8 +197,8 @@ def main() -> None:
 
     # Annotate the machine epsilon line using axes coordinates for visibility
     ax.text(
-        0.8,  # x position (5% from the left)
-        0.15,  # y position (95% from the bottom)
+        0.8,  # x position (80% from the left)
+        0.15,  # y position (15% from the bottom)
         r'$\epsilon_{\mathrm{machine}} \approx 2.22 \times 10^{-16}$',
         color='red',
         fontsize=12,
