@@ -50,7 +50,7 @@ def main() -> None:
     T_orbit = 2 * np.pi / Omega_max  # Time for one orbit at Rmax
 
     # Total simulation time should be at least one orbital period at Rmax
-    t_max = T_orbit * 0.2  # Simulate for 1 orbital period at Rmax
+    t_max = T_orbit * 1  # Simulate for 1 orbital period at Rmax
 
     # Time step
     dt = 0.1  # Smaller time step for better accuracy

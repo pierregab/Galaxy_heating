@@ -461,6 +461,28 @@ class Galaxy(System):
 
         logging.info(f"Initialization complete with {N} particles on circular orbits, each with mass {mass_per_star:.6e}.")
 
+
+    def initialize_stars_specific(self, positions: np.ndarray, velocities: np.ndarray, masses: np.ndarray = None) -> None:
+        """
+        Initialize multiple stars with specified positions and velocities.
+
+        Parameters:
+            positions (np.ndarray): Array of position vectors [N, 3].
+            velocities (np.ndarray): Array of velocity vectors [N, 3].
+            masses (np.ndarray, optional): Array of masses [N]. If None, masses are set to galaxy's mass divided by number of stars.
+        """
+        N = positions.shape[0]
+        
+        if masses is None:
+            masses = np.full(N, self.M / N)
+        elif len(masses) != N:
+            raise ValueError("Length of masses array must match number of positions and velocities.")
+
+        for i in range(N):
+            particle = Particle(positions[i], velocities[i], masses[i])
+            self.particles.append(particle)
+            logging.info(f"Initialized star {i+1}/{N} at position {positions[i]} with velocity {velocities[i]} and mass {masses[i]:.6e}.")
+
     def circular_velocity(self, R:float|np.ndarray[float]) -> float|np.ndarray[float]:
         """
         Compute the circular velocity at radius R.
