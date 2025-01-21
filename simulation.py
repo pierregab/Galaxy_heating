@@ -15,8 +15,23 @@ from matplotlib.gridspec import GridSpec
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from copy import deepcopy
 
+# Configure Matplotlib to use LaTeX for text rendering
+plt.rcParams.update({
+    "text.usetex": True,              # Enable LaTeX rendering
+    "font.family": "serif",           # Use serif fonts
+    "font.serif": ["Computer Modern Roman"],  # Choose a LaTeX-like serif font
+    "font.size": 14,                   # Set a default font size
+    "axes.labelsize": 14,              # Font size for axis labels
+    "axes.titlesize": 16,              # Font size for plot titles
+    "legend.fontsize": 14,             # Font size for legends
+    "xtick.labelsize": 14,             # Font size for x-tick labels
+    "ytick.labelsize": 14,             # Font size for y-tick labels
+    "text.latex.preamble": r"\usepackage{amsmath}"  # Optional: Add LaTeX packages
+})
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class Simulation(System):
     """
@@ -298,13 +313,29 @@ class Simulation(System):
 
     def plot_angular_momentum_error(self) -> None:
         """
-        Plot the angular momentum conservation error over time, including a dedicated subplot for Lz.
+        Plot the relative error in the Lz component of angular momentum over time.
+        This version is optimized for publication quality without using a color palette,
+        includes a horizontal line representing machine epsilon for double precision,
+        and saves the plot as a high-resolution PNG.
         """
-        logging.info("Generating angular momentum conservation error plot.")
+        logging.info("Generating publication-ready Lz angular momentum conservation error plot with machine epsilon.")
         
-        plt.figure(figsize=(14, 15))  # Increased height to accommodate an extra subplot
-
+        # Define colors for specific integrators
+        integrator_colors = {
+            'Yoshida': 'orange',
+            'RK4': 'blue',
+            'Leapfrog': 'green'
+        }
+        
+        # Calculate machine epsilon for double precision
+        epsilon = np.finfo(np.float64).eps  # Approximately 2.220446049250313e-16
+        
+        plt.figure(figsize=(10, 6))  # Standard figure size for publications
+        
         for integrator_name in self.integrators:
+            # Assign color based on integrator name, default to black if not specified
+            color = integrator_colors.get(integrator_name, 'black')
+            
             # Time array in physical units (e.g., Myr)
             times_physical = self.times * self.time_scale  # Assuming self.times is in simulation units
 
@@ -319,54 +350,59 @@ class Simulation(System):
                 L_total = np.sum(self.angular_momenta[integrator_name], axis=1)  # [steps, 3]
                 L0_total = L_total[0]
 
-            # Compute the magnitude of total angular momentum at each step
-            L_magnitude = np.linalg.norm(L_total, axis=1)  # [steps]
-            L0_magnitude = np.linalg.norm(L0_total)
-
-            # Compute relative error in magnitude
-            relative_error_magnitude = np.abs(L_magnitude - L0_magnitude) / np.abs(L0_magnitude)  # [steps]
-
-            # Compute relative error for each component
-            relative_error_components = np.abs(L_total - L0_total) / np.abs(L0_total)  # [steps, 3]
-            relative_error_x = relative_error_components[:, 0]
-            relative_error_y = relative_error_components[:, 1]
-            relative_error_z = relative_error_components[:, 2]
-
-            # Plot Relative Error in Total Angular Momentum Magnitude
-            plt.subplot(3, 1, 1)  # Changed from (2,1,1) to (3,1,1)
-            plt.plot(times_physical, relative_error_magnitude, label=integrator_name, linewidth=1)
-            plt.xlabel('Time (Myr)', fontsize=14)
-            plt.ylabel('Relative Error in |L|', fontsize=14)
-            plt.title('Total Angular Momentum Conservation Error', fontsize=16)
-            plt.yscale('log')
-            plt.grid(True)
-
-            # Plot Relative Error in Each Angular Momentum Component
-            plt.subplot(3, 1, 2)  # Changed from (2,1,2) to (3,1,2)
-            plt.plot(times_physical, relative_error_x, label=f'{integrator_name} Lx', linewidth=1)
-            plt.plot(times_physical, relative_error_y, label=f'{integrator_name} Ly', linewidth=1)
-            plt.plot(times_physical, relative_error_z, label=f'{integrator_name} Lz', linewidth=1)
-            plt.xlabel('Time (Myr)', fontsize=14)
-            plt.ylabel('Relative Error in L Components', fontsize=14)
-            plt.title('Angular Momentum Conservation Error per Component', fontsize=16)
-            plt.yscale('log')
-            plt.legend(fontsize=12)
-            plt.grid(True)
-
-            # Add a Dedicated Subplot for Lz
-            plt.subplot(3, 1, 3)
-            plt.plot(times_physical, relative_error_z, label=f'{integrator_name} Lz', linewidth=1)
-            plt.xlabel('Time (Myr)', fontsize=14)
-            plt.ylabel('Relative Error in Lz', fontsize=14)
-            plt.title('Angular Momentum Conservation Error for Lz Component', fontsize=16)
-            plt.yscale('log')
-            plt.legend(fontsize=12)
-            plt.grid(True)
-
+            # Compute relative error for the Lz component
+            relative_error_z = np.abs(L_total[:, 2] - L0_total[2]) / np.abs(L0_total[2])  # [steps]
+            
+            # Plot Lz component error
+            plt.plot(
+                times_physical, 
+                relative_error_z, 
+                color=color, 
+                label=integrator_name, 
+                linewidth=1.5
+            )
+        
+        # Add machine epsilon line
+        plt.axhline(
+            y=epsilon, 
+            color='black',  
+            linewidth=2.0, 
+            label='Machine Epsilon ($\epsilon$)'
+        )
+        
+        # Optional: Add annotation for machine epsilon
+        plt.text(
+            x=times_physical[-1], 
+            y=epsilon, 
+            s='$\epsilon$', 
+            va='bottom', 
+            ha='right', 
+            fontsize=10,
+            color='black'
+        )
+        
+        # Customize the plot
+        plt.xlabel('Time (Myr)', fontsize=14)
+        plt.ylabel('Relative Error in $L_z$', fontsize=14)
+        plt.title('Angular Momentum Conservation Error for $L_z$ Component', fontsize=16, fontweight='bold')
+        plt.yscale('log')  # Logarithmic scale for better visibility of error variations
+        # add all the lines for the log scale
+        plt.grid(True, which="both", linestyle='--', linewidth=0.5)
+        
+        # Adjust legend to include machine epsilon, shift the legend in y-direction
+        plt.legend(title='Integrator', fontsize=12, title_fontsize=12, loc='upper right', bbox_to_anchor=(1.0, 0.85))
+        
+        plt.grid(True, which="both", linestyle='--', linewidth=0.5)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        
         plt.tight_layout()
-        plt.savefig(os.path.join(self.results_dir, 'angular_momentum_error.png'))
+        
+        # Save the figure in PNG format with high resolution
+        output_path = os.path.join(self.results_dir, 'angular_momentum_error_Lz.png')
+        plt.savefig(output_path, format='png', dpi=300, bbox_inches='tight')
         plt.close()
-        logging.info(f"Angular momentum conservation error plot saved to '{self.results_dir}/angular_momentum_error.png'.")
+        logging.info(f"Lz angular momentum conservation error plot with machine epsilon saved to '{output_path}'.")
 
 
     def plot_execution_time(self) -> None:
@@ -547,7 +583,7 @@ class Simulation(System):
                         yerr=np.array(uncertainties_R[moment_label]),
                         marker=moment_styles[moment_label]['marker_R'],
                         linestyle=moment_styles[moment_label]['linestyle_R'],
-                        label=f"{moment_label} σ_R",
+                        label=f"{moment_label} $\sigma_R$",
                         color=moment_styles[moment_label]['color'],
                         capsize=3,
                         markersize=6,
@@ -560,7 +596,7 @@ class Simulation(System):
                         yerr=np.array(uncertainties_z[moment_label]),
                         marker=moment_styles[moment_label]['marker_z'],
                         linestyle=moment_styles[moment_label]['linestyle_z'],
-                        label=f"{moment_label} σ_z",
+                        label=f"{moment_label} $\sigma_z$",
                         color=moment_styles[moment_label]['color'],
                         capsize=3,
                         markersize=6,
@@ -570,11 +606,11 @@ class Simulation(System):
             # Plot initial theoretical dispersions as solid lines
             sigma_R_init = np.array(sigma_R_init)
             sigma_z_init = np.array(sigma_z_init)
-            plt.plot(R_c_centers, sigma_R_init, 'k-', label='Initial σ_R (Theoretical)', linewidth=2)
-            plt.plot(R_c_centers, sigma_z_init, 'k--', label='Initial σ_z (Theoretical)', linewidth=2)
+            plt.plot(R_c_centers, sigma_R_init, 'k-', label='Initial $\sigma_R$ (Theoretical)', linewidth=2)
+            plt.plot(R_c_centers, sigma_z_init, 'k--', label='Initial $\sigma_z$ (Theoretical)', linewidth=2)
 
             plt.xlabel('Reference Radius $R_c$ (kpc)', fontsize=16)
-            plt.ylabel('Velocity Dispersion σ (km/s)', fontsize=16)
+            plt.ylabel('Velocity Dispersion $\sigma_R$ (km/s)', fontsize=16)
             plt.title(f'Velocity Dispersions at Different Moments ({integrator_name})', fontsize=18)
 
             # Place the legend outside the plot to avoid overlapping with data
@@ -779,10 +815,10 @@ class Simulation(System):
 
             # Plot theoretical initial dispersions as distinct lines
             sigma_init = np.array(sigma_init)
-            if sigma_label == 'Radial Velocity Dispersion σ_R':
-                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial σ_R (Theoretical)', zorder=3)
-            elif sigma_label == 'Vertical Velocity Dispersion σ_z':
-                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial σ_z (Theoretical)', zorder=3)
+            if sigma_label == 'Radial Velocity Dispersion $\sigma_R$':
+                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial $\sigma_R$ (Theoretical)', zorder=3)
+            elif sigma_label == 'Vertical Velocity Dispersion $\sigma_z$':
+                ax.plot(R_c_centers, sigma_init, color='red', linestyle='-', linewidth=3.5, label='Initial $\sigma_z$ (Theoretical)', zorder=3)
 
             # Set limits
             ax.set_xlim(R_min, R_max)
@@ -821,7 +857,7 @@ class Simulation(System):
                 integrator_name=integrator_name,
                 sigma_time=sigma_R_time[integrator_name],
                 time_vals=time_values[integrator_name],
-                sigma_label='Radial Velocity Dispersion σ_R',
+                sigma_label='Radial Velocity Dispersion $\sigma_R$',
                 cmap_name='cividis',  # Colorblind-friendly colormap
                 filename=f'velocity_dispersion_sigmaR_time_gradient_{integrator_name.lower()}.png',
                 sigma_init=sigma_R_init_dict[integrator_name]
@@ -834,7 +870,7 @@ class Simulation(System):
                 integrator_name=integrator_name,
                 sigma_time=sigma_z_time[integrator_name],
                 time_vals=time_values[integrator_name],
-                sigma_label='Vertical Velocity Dispersion σ_z',
+                sigma_label='Vertical Velocity Dispersion $\sigma_z$',
                 cmap_name='magma',  # Consider 'magma' or 'inferno' if preferred
                 filename=f'velocity_dispersion_sigmaZ_time_gradient_{integrator_name.lower()}.png',
                 sigma_init=sigma_z_init_dict[integrator_name]

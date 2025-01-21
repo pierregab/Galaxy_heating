@@ -32,11 +32,11 @@ def main() -> None:
     galaxy = Galaxy(mass=1.0, a=2.0, b=0.1, epsilon=0.1)
 
     # Initialize stars with the Schwarzschild velocity distribution
-    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100)
+    galaxy.initialize_stars(N=N_stars, Rmax=Rmax, alpha=0.05, max_iterations=100, use_schwarzschild=True)
 
     # Create Perturber instance
     M_BH = 1*0.07  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 5.0])  # Initial position [x, y, z]
+    initial_position_BH = np.array([5.0, 0.0, 8.0])  # Initial position [x, y, z]
     initial_velocity_BH = np.array([0.0, 0.0, -0.4])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
