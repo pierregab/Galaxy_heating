@@ -36,8 +36,8 @@ def main() -> None:
 
     # Create Perturber instance
     M_BH = 1*0.07  # Mass of the perturber (normalized)
-    initial_position_BH = np.array([5.0, 0.0, 8.0])  # Initial position [x, y, z]
-    initial_velocity_BH = np.array([0.0, 0.0, -0.4])  # Initial velocity [vx, vy, vz]
+    initial_position_BH = np.array([7.0, 0.0, 8.0])  # Initial position [x, y, z]
+    initial_velocity_BH = np.array([0.0, 0.0, -0.7])  # Initial velocity [vx, vy, vz]
 
     perturber1 = Perturber(mass=M_BH, position=initial_position_BH, velocity=initial_velocity_BH)
     perturber2 = Perturber(mass=M_BH, position=-0.7*initial_position_BH, velocity=-0.5*initial_velocity_BH)
@@ -84,7 +84,7 @@ def main() -> None:
     simulation.compute_velocity_dispersions_continuous()
 
     # Plot velocity histograms
-    simulation.plot_velocity_histograms(subset=200)
+    #simulation.plot_velocity_histograms(subset=200)
 
     # Compute and log differences between integrators
     simulation.log_integrator_differences()
