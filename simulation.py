@@ -7,6 +7,7 @@ from galaxy import Galaxy
 from integrators import Integrator
 import os  # Import the os module for directory operations
 import ffmpeg
+import platform
 import logging
 import numpy as np
 from scipy.stats import norm
@@ -28,6 +29,8 @@ plt.rcParams.update({
     "ytick.labelsize": 14,             # Font size for y-tick labels
     "text.latex.preamble": r"\usepackage{amsmath}"  # Optional: Add LaTeX packages
 })
+# If no latex, comment section above and uncomment the following line:
+# plt.rcParams.update(plt.rcParamsDefault)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1320,17 +1323,26 @@ class Simulation(System):
             plt.close()
             logging.info(f"Rotation curve plot for {integrator_name} saved to '{self.results_dir}/{filename}'.")
 
-    def create_animation(self, path):
+    @staticmethod
+    def create_animation(path):
         if not os.path.exists(path):
             raise NameError(f"Path '{path}' is unknown. Please check the path.")
         
         frames_nb = len([fn for fn in os.listdir(path) if os.path.isfile(os.path.join(path,fn)) and str.endswith(fn, '.png')])
-        (
-            ffmpeg
-            .input(os.path.join(path,'*.png'), pattern_type='glob', framerate=25)
-            .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
-            .run()
-        )
+        if "windows" in platform.system().lower():
+            (
+                ffmpeg
+                .input(os.path.join(path,f'%0{len(str(frames_nb))}d.png'), framerate=50)
+                .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
+                .run()
+            )
+        else:
+            (
+                ffmpeg
+                .input(os.path.join(path,'*.png'), pattern_type='glob', framerate=50)
+                .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
+                .run()
+            )
         logging.info(f"Animation_{frames_nb}_snapshots.mp4 ({0.041*frames_nb}s) saved in {path}.")
 
     def get_energy_difference(self) -> dict:
