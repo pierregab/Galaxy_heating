@@ -1332,14 +1332,14 @@ class Simulation(System):
         if "windows" in platform.system().lower():
             (
                 ffmpeg
-                .input(os.path.join(path,f'%0{len(str(frames_nb))}d.png'), framerate=50)
+                .input(os.path.join(path,f'%0{len(str(frames_nb))}d.png'), framerate=100)
                 .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
                 .run()
             )
         else:
             (
                 ffmpeg
-                .input(os.path.join(path,'*.png'), pattern_type='glob', framerate=50)
+                .input(os.path.join(path,'*.png'), pattern_type='glob', framerate=100)
                 .output(os.path.join(path,f"Animation_{frames_nb}_snapshots.mp4"))
                 .run()
             )
